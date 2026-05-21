@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -7,6 +7,9 @@ import anthropic
 import json
 import io
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="MUBEC — Calculadora de Horas Extras")
 
@@ -91,7 +94,8 @@ def health():
     return {"status": "ok", "api_key_configured": api_ok}
 
 
-# Servir frontend
-frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+# Servir frontend — funciona local e no Railway
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+frontend_path = os.path.join(BASE_DIR, "frontend")
 if os.path.exists(frontend_path):
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
