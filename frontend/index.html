@@ -163,6 +163,7 @@
 
     .col-uteis { background: #e6faf3; }
     .col-dom { background: var(--amber-bg); }
+    .col-desc { background: #fce8e8; }
 
     tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
     tbody tr:last-child { border-bottom: none; }
@@ -307,7 +308,8 @@
         <th rowspan="2" style="min-width:70px">HE Úteis<br>Total</th>
         <th colspan="4" class="col-uteis">Dias Úteis — Faixas Progressivas</th>
         <th colspan="2" class="col-dom">Dom / Feriados</th>
-        <th rowspan="2" style="width:36px"></th>
+        <th rowspan="2" style="min-width:70px" class="col-desc">H. Descontadas</th>
+      <th rowspan="2" style="width:36px"></th>
       </tr>
       <tr class="subhead">
         <th class="col-uteis"><span class="pill pill-green">+50%</span><br><span style="font-size:9px;font-weight:400">≤ 25h</span></th>
@@ -423,10 +425,10 @@ async function handleFiles(files) {
       const data = await r.json();
       const ex = funcionarios.find(x => norm(x.nome) === norm(data.nome));
       if (ex) {
-        Object.assign(ex, { hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, imported: true });
+        Object.assign(ex, { hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, hd_desc: data.horas_desconto, imported: true }); ex.nome = ex.nome.toUpperCase();
         log('✓ Atualizado: ' + data.nome, 'ok');
       } else {
-        funcionarios.push({ id: ++idSeq, nome: data.nome, hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, imported: true });
+        funcionarios.push({ id: ++idSeq, nome: data.nome.toUpperCase(), hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, hd_desc: data.horas_desconto, imported: true });
         log('✓ Importado: ' + data.nome, 'ok');
       }
       render();
@@ -447,7 +449,7 @@ async function handleFiles(files) {
 function norm(s) { return (s || '').toUpperCase().replace(/\s+/g, ' ').trim(); }
 
 function addManual() {
-  funcionarios.push({ id: ++idSeq, nome: '', hu: 0, hs: 0, hd: 0, hde: 0, imported: false });
+  funcionarios.push({ id: ++idSeq, nome: '', hu: 0, hs: 0, hd: 0, hde: 0, hd_desc: 0, imported: false });
   render();
   setTimeout(() => {
     const rows = document.querySelectorAll('#tbody tr');
@@ -510,22 +512,23 @@ function render() {
   document.getElementById('count').textContent = funcionarios.length + ' funcionário' + (funcionarios.length !== 1 ? 's' : '');
 
   if (!funcionarios.length) {
-    tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:3rem;color:#aaa;font-size:13px">Importe PDFs ou adicione funcionários manualmente.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:3rem;color:#aaa;font-size:13px">Importe PDFs ou adicione funcionários manualmente.</td></tr>`;
     tf.innerHTML = '';
     return;
   }
 
-  let rows = '', tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0 };
-  for (const f of funcionarios) {
+  const sorted = [...funcionarios].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  let rows = '', tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0, hd_desc: 0 };
+  for (const f of sorted) {
     const huTotal = f.hu + f.hs;
     const d = dist(huTotal), hn = f.hd;
     tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
-    tots.hn += hn; tots.hx += f.hde;
+    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0); tots.hd_desc += (f.hd_desc || 0);
     const imp = f.imported ? ' class="imported"' : '';
     const badge = f.imported ? '<span class="badge-pdf">PDF</span>' : '';
     rows += `<tr${imp}>
       <td style="white-space:nowrap">
-        <input type="text" value="${f.nome.replace(/"/g, '&quot;')}" oninput="upd(${f.id},'nome',this.value)" style="min-width:180px">
+        <input type="text" value="${f.nome.replace(/"/g, '&quot;')}" oninput="upd(${f.id},'nome',this.value.toUpperCase());this.value=this.value.toUpperCase()" style="min-width:180px">
         ${badge}
       </td>
       <td class="val-cell">${fH(huTotal)}</td>
@@ -535,6 +538,7 @@ function render() {
       <td class="val-cell">${fH(d[3])}</td>
       <td class="input-cell"><input type="text" value="${f.hd > 0 ? decToHHMM(f.hd) : ''}" placeholder="—" oninput="upd(${f.id},'hd',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
       <td class="input-cell"><input type="text" value="${f.hde > 0 ? decToHHMM(f.hde) : ''}" placeholder="—" oninput="upd(${f.id},'hde',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
+      <td class="input-cell col-desc"><input type="text" value="${f.hd_desc > 0 ? decToHHMM(f.hd_desc) : ''}" placeholder="—" oninput="upd(${f.id},'hd_desc',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
       <td><button class="del-btn" onclick="remove(${f.id})" title="Remover"><i class="ti ti-trash"></i></button></td>
     </tr>`;
   }
@@ -546,6 +550,7 @@ function render() {
     <td>${fv(tots.hu)}</td>
     <td>${fv(tots.d[0])}</td><td>${fv(tots.d[1])}</td><td>${fv(tots.d[2])}</td><td>${fv(tots.d[3])}</td>
     <td>${fv(tots.hn)}</td><td>${fv(tots.hx)}</td>
+    <td class="col-desc" style="color:#e24b4a">${fv(tots.hd_desc)}</td>
     <td></td>
   </tr>`;
 }
@@ -589,17 +594,19 @@ function exportPDF() {
   doc.line(14, 26, W - 14, 26);
 
   // ── Dados ─────────────────────────────────────────────────────
-  const tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0 };
-  const body = funcionarios.map(f => {
+  const sorted = [...funcionarios].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  const tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0, hd_desc: 0 };
+  const body = sorted.map(f => {
     const huTotal = f.hu + f.hs;
     const d = dist(huTotal), hn = f.hd;
     tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
-    tots.hn += hn; tots.hx += f.hde;
+    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0); tots.hd_desc += (f.hd_desc || 0);
     return [
       f.nome,
       fHpdf(huTotal),
       fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]),
-      fHpdf(hn), fHpdf(f.hde)
+      fHpdf(hn), fHpdf(f.hde),
+      fHpdf(f.hd_desc || 0)
     ];
   });
 
@@ -615,6 +622,7 @@ function exportPDF() {
 Total', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
         { content: 'Dias Úteis — Faixas Progressivas', colSpan: 4, styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: 'Dom / Feriados', colSpan: 2, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: 'H. Descontadas', rowSpan: 2, styles: { valign: 'middle', halign: 'center', fillColor: [252, 232, 232], textColor: [163, 45, 45] } },
       ],
       [
         { content: '+50%
@@ -635,7 +643,8 @@ ate 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: 
     foot: [[
       'TOTAL GERAL', fHpdf(tots.hu),
       fHpdf(tots.d[0]), fHpdf(tots.d[1]), fHpdf(tots.d[2]), fHpdf(tots.d[3]),
-      fHpdf(tots.hn), fHpdf(tots.hx)
+      fHpdf(tots.hn), fHpdf(tots.hx),
+      fHpdf(tots.hd_desc)
     ]],
     theme: 'grid',
     styles: { fontSize: 8.5, cellPadding: 3, font: 'helvetica', textColor: [30, 30, 30], valign: 'middle' },
@@ -648,8 +657,9 @@ ate 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: 
       3: { cellWidth: 18, halign: 'center' },
       4: { cellWidth: 18, halign: 'center' },
       5: { cellWidth: 18, halign: 'center' },
-      6: { cellWidth: 22, halign: 'center' },
-      7: { cellWidth: 20, halign: 'center' },
+      6: { cellWidth: 20, halign: 'center' },
+      7: { cellWidth: 18, halign: 'center' },
+      8: { cellWidth: 20, halign: 'center', textColor: [163, 45, 45] },
     },
     alternateRowStyles: { fillColor: [248, 254, 251] },
     margin: { left: 14, right: 14 },
