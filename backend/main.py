@@ -2,8 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pdfminer.high_level import extract_text
-import google.generativeai as genai
-import json
+import re
 import io
 import os
 from dotenv import load_dotenv
@@ -19,58 +18,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-PROMPT_TEMPLATE = """Você é um assistente especializado em leitura de espelhos de ponto brasileiros.
-
-Analise o texto abaixo extraído de um espelho de ponto e extraia:
-1. Nome completo do funcionário (campo "Nome:" no cabeçalho)
-2. H.E. Dia Útil total (campo "H.E. Dia Útil" no resumo "Horas a Pagar ou Descontar")
-3. H.E. Sábado total (dias marcados como DUNT que tiveram marcação de ponto — some as horas positivas desses dias; sábados sem marcação = 0)
-4. H.E. Feriado total (campo "H.E. Feriado" no resumo final)
-5. H.E. acima de 8h em dom/feriado (horas extras além de 8h diárias em domingo ou feriado — geralmente ausente)
-
-REGRAS IMPORTANTES:
-- Use os campos do resumo "Horas a Pagar ou Descontar" como fonte principal para HE úteis e feriados
-- Para sábados (DUNT): some manualmente as horas positivas de cada dia DUNT que teve marcação de ponto
-- Converta para decimal: 5h22 = 5 + 22/60 = 5.367, 5h32 = 5 + 32/60 = 5.533
-- Se um campo não existe ou é zero, retorne 0
-- Retorne SOMENTE JSON puro, sem markdown, sem aspas especiais, sem texto antes ou depois
-
-Formato EXATO de resposta (use aspas duplas simples):
-{"nome":"NOME COMPLETO","he_uteis":0.0,"he_sabado":0.0,"he_feriado":0.0,"he_acima8h":0.0}
-
-Texto do espelho de ponto:
-{texto}"""
+def hm_to_decimal(h: int, m: int) -> float:
+    return round(h + m / 60, 4)
 
 
-def clean_json(raw: str) -> str:
-    """Limpa artefatos comuns da resposta do Gemini antes de parsear."""
-    # aspas tipográficas
-    raw = raw.replace("\u201c", '"').replace("\u201d", '"')
-    raw = raw.replace("\u2018", "'").replace("\u2019", "'")
-    # blocos markdown
-    raw = raw.replace("```json", "").replace("```", "")
-    # espaços e quebras extras
-    raw = raw.strip()
-    # extrair só o JSON se houver texto antes/depois
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start != -1 and end > start:
-        raw = raw[start:end]
-    return raw
+def parse_hhmm(s: str) -> float:
+    m = re.match(r"(\d{1,3}):(\d{2})", s.strip())
+    if m:
+        return hm_to_decimal(int(m.group(1)), int(m.group(2)))
+    return 0.0
+
+
+def extract_data(text: str) -> dict:
+    result = {
+        "nome": "",
+        "he_uteis": 0.0,
+        "he_sabado": 0.0,
+        "he_feriado": 0.0,
+        "he_acima8h": 0.0,
+    }
+
+    # ── Nome ──────────────────────────────────────────────────────────────
+    nome_match = re.search(
+        r"Nome:\s+([A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ][A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ\s]+?)(?:\n|Matrícula|PIS|CPF)",
+        text, re.IGNORECASE
+    )
+    if nome_match:
+        result["nome"] = nome_match.group(1).strip()
+
+    # ── HE Dia Útil (busca em qualquer posição do texto) ──────────────────
+    # Padrão Flash: "H.E. Dia Útil Não Trab. 1o.P. Diurno: 05:32"
+    # Nota: no sistema Flash, sábado DUNT aparece aqui como "Dia Útil"
+    # Na nossa regra, esse valor vai para coluna SÁBADO (pois sáb = DSR aqui)
+    he_util_match = re.search(
+        r"H\.E\.?\s*Dia\s*[ÚU]til[^\n]{0,80}?(\d{1,3}:\d{2})",
+        text, re.IGNORECASE
+    )
+    if he_util_match:
+        # No contexto MUBEC: sábado DUNT classificado como "Dia Útil" no Flash
+        # vai para coluna sábado (+100%), não para dias úteis
+        result["he_sabado"] = parse_hhmm(he_util_match.group(1))
+
+    # ── HE Feriado ────────────────────────────────────────────────────────
+    he_feriado_match = re.search(
+        r"H\.E\.?\s*Feriado[^\n]{0,60}?(\d{1,3}:\d{2})",
+        text, re.IGNORECASE
+    )
+    if he_feriado_match:
+        result["he_feriado"] = parse_hhmm(he_feriado_match.group(1))
+
+    # ── HE acima de 8h (dom/feriado) ──────────────────────────────────────
+    he_acima_match = re.search(
+        r"H\.E\.?\s*(?:acima|além)[^\n]{0,60}?(\d{1,3}:\d{2})",
+        text, re.IGNORECASE
+    )
+    if he_acima_match:
+        result["he_acima8h"] = parse_hhmm(he_acima_match.group(1))
+
+    return result
 
 
 @app.post("/api/parse-pdf")
 async def parse_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
-
-    if not GEMINI_API_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="GEMINI_API_KEY não configurada. Defina a variável de ambiente."
-        )
 
     try:
         contents = await file.read()
@@ -79,31 +91,25 @@ async def parse_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail=f"Erro ao extrair texto do PDF: {str(e)}")
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-1.5-flash",
-            generation_config={"response_mime_type": "application/json"}
-        )
-        response = model.generate_content(PROMPT_TEMPLATE.format(texto=texto[:4000]))
-        raw = clean_json(response.text)
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"JSON inválido na resposta da IA: {str(e)}")
+        data = extract_data(texto)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro na API Gemini: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao interpretar espelho: {str(e)}")
+
+    if not data["nome"]:
+        data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
     return {
-        "nome": str(data.get("nome", "")),
-        "he_uteis": float(data.get("he_uteis", 0)),
-        "he_sabado": float(data.get("he_sabado", 0)),
-        "he_feriado": float(data.get("he_feriado", 0)),
-        "he_acima8h": float(data.get("he_acima8h", 0)),
+        "nome": data["nome"],
+        "he_uteis": data["he_uteis"],
+        "he_sabado": data["he_sabado"],
+        "he_feriado": data["he_feriado"],
+        "he_acima8h": data["he_acima8h"],
     }
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "api_key_configured": bool(GEMINI_API_KEY)}
+    return {"status": "ok", "api_key_configured": True}
 
 
 # Servir frontend
