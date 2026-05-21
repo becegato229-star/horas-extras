@@ -257,7 +257,7 @@
   <button class="btn btn-green" id="btn-import" onclick="document.getElementById('pdf-input').click()">
     <i class="ti ti-upload"></i> Importar PDFs
   </button>
-  <input type="file" id="pdf-input" accept="application/pdf" multiple style="display:none" onchange="handleFiles(this.files)">
+  <input type="file" id="pdf-input" accept="application/pdf" multiple style="display:none" onchange="processing=false;handleFiles(this.files)">
 
   <button class="btn btn-outline" onclick="addManual()">
     <i class="ti ti-plus"></i> Adicionar manual
@@ -357,18 +357,20 @@ function toggleConfig() {
 async function checkHealth() {
   const badge = document.getElementById('api-badge');
   try {
-    const r = await fetch(API_BASE + '/api/health');
-    const d = await r.json();
-    if (d.api_key_configured) {
-      badge.textContent = '● API conectada';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const r = await fetch(API_BASE + '/api/health', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (r.ok) {
+      badge.textContent = '● Pronto';
       badge.className = 'api-status api-ok';
     } else {
-      badge.textContent = '⚠ Configure a API key';
+      badge.textContent = '⚠ Erro no servidor';
       badge.className = 'api-status api-err';
     }
   } catch {
-    badge.textContent = '⚠ Backend offline';
-    badge.className = 'api-status api-err';
+    badge.textContent = '● Pronto (local)';
+    badge.className = 'api-status api-ok';
   }
 }
 checkHealth();
@@ -433,7 +435,8 @@ async function handleFiles(files) {
       }
       render();
     } catch (e) {
-      log('✗ Erro: ' + f.name + ' — ' + e.message, 'err');
+      const msg = e.name === 'TypeError' ? 'Não foi possível conectar ao servidor. Verifique se o backend está rodando.' : e.message;
+      log('✗ ' + f.name + ': ' + msg, 'err');
     }
   }
 
@@ -443,6 +446,7 @@ async function handleFiles(files) {
   document.getElementById('pdf-input').value = '';
   document.getElementById('btn-import').disabled = false;
   processing = false;
+  if (!funcionarios.length) dz.style.display = '';
 }
 
 // ── HELPERS ─────────────────────────────────────────────────────
