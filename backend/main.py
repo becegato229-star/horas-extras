@@ -19,6 +19,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import Request
+from fastapi.responses import Response
+
+@app.middleware("http")
+async def no_cache_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.endswith(".html") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 
 def parse_min(s: str) -> int:
     m = re.match(r"(\d{1,3}):(\d{2})", s.strip())
@@ -120,7 +132,11 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "api_key_configured": True}
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content={"status": "ok", "api_key_configured": True},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 
 # Servir frontend
