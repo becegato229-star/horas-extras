@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pdfminer.high_level import extract_text
+from collections import Counter
 import re
 import io
 import os
@@ -19,15 +20,14 @@ app.add_middleware(
 )
 
 
-def hm_to_decimal(h: int, m: int) -> float:
-    return round(h + m / 60, 4)
+def parse_min(s: str) -> int:
+    m = re.match(r"(\d{1,3}):(\d{2})", s.strip())
+    return int(m.group(1)) * 60 + int(m.group(2)) if m else 0
 
 
 def parse_hhmm(s: str) -> float:
-    m = re.match(r"(\d{1,3}):(\d{2})", s.strip())
-    if m:
-        return hm_to_decimal(int(m.group(1)), int(m.group(2)))
-    return 0.0
+    mins = parse_min(s)
+    return round(mins / 60, 4)
 
 
 def extract_data(text: str) -> dict:
@@ -39,7 +39,7 @@ def extract_data(text: str) -> dict:
         "he_acima8h": 0.0,
     }
 
-    # ── Nome ──────────────────────────────────────────────────────────────
+    # ── Nome ──────────────────────────────────────────────────────
     nome_match = re.search(
         r"Nome:\s+([A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ][A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ\s]+?)(?:\n|Matrícula|PIS|CPF)",
         text, re.IGNORECASE
@@ -47,34 +47,35 @@ def extract_data(text: str) -> dict:
     if nome_match:
         result["nome"] = nome_match.group(1).strip()
 
-    # ── HE Dia Útil (busca em qualquer posição do texto) ──────────────────
-    # Padrão Flash: "H.E. Dia Útil Não Trab. 1o.P. Diurno: 05:32"
-    # Nota: no sistema Flash, sábado DUNT aparece aqui como "Dia Útil"
-    # Na nossa regra, esse valor vai para coluna SÁBADO (pois sáb = DSR aqui)
-    he_util_match = re.search(
+    # ── HE Sábado: campo "H.E. Dia Útil" do resumo Flash ─────────
+    # No sistema Flash/MUBEC, sábados DUNT são classificados como "Dia Útil"
+    he_util_flash = re.search(
         r"H\.E\.?\s*Dia\s*[ÚU]til[^\n]{0,80}?(\d{1,3}:\d{2})",
         text, re.IGNORECASE
     )
-    if he_util_match:
-        # No contexto MUBEC: sábado DUNT classificado como "Dia Útil" no Flash
-        # vai para coluna sábado (+100%), não para dias úteis
-        result["he_sabado"] = parse_hhmm(he_util_match.group(1))
+    if he_util_flash:
+        result["he_sabado"] = parse_hhmm(he_util_flash.group(1))
 
-    # ── HE Feriado ────────────────────────────────────────────────────────
+    # ── HE Feriado: campo "H.E. Feriado" do resumo ───────────────
     he_feriado_match = re.search(
         r"H\.E\.?\s*Feriado[^\n]{0,60}?(\d{1,3}:\d{2})",
         text, re.IGNORECASE
     )
+    feriado_str = None
     if he_feriado_match:
-        result["he_feriado"] = parse_hhmm(he_feriado_match.group(1))
+        feriado_str = he_feriado_match.group(1)
+        result["he_feriado"] = parse_hhmm(feriado_str)
 
-    # ── HE acima de 8h (dom/feriado) ──────────────────────────────────────
-    he_acima_match = re.search(
-        r"H\.E\.?\s*(?:acima|além)[^\n]{0,60}?(\d{1,3}:\d{2})",
-        text, re.IGNORECASE
-    )
-    if he_acima_match:
-        result["he_acima8h"] = parse_hhmm(he_acima_match.group(1))
+    # ── HE Dias Úteis: horas positivas de TRAB que aparecem 2x ───
+    # O pdfminer extrai a coluna "Horas Positivas" e "Crédito" separadamente,
+    # fazendo com que cada valor de HE de dia útil apareça exatamente 2x no texto.
+    # Filtramos valores <= 3h59 (máximo realista de HE diária) excluindo feriado.
+    corpo = text[:text.find("Totais Gerais")] if "Totais Gerais" in text else text
+    todos = re.findall(r'\b(\d{1,2}:\d{2})\b', corpo)
+    pequenos = [v for v in todos if 0 < parse_min(v) <= 239]
+    contagem = Counter(pequenos)
+    he_uteis_vals = [v for v, cnt in contagem.items() if cnt == 2 and v != feriado_str]
+    result["he_uteis"] = round(sum(parse_min(v) for v in he_uteis_vals) / 60, 4)
 
     return result
 
