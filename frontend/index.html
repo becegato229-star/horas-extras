@@ -306,7 +306,7 @@
         <th rowspan="2" style="text-align:left;min-width:200px">Funcionário</th>
         <th rowspan="2" style="min-width:70px">HE Úteis<br>Total</th>
         <th colspan="4" class="col-uteis">Dias Úteis — Faixas Progressivas</th>
-        <th colspan="3" class="col-dom">Sáb / Dom / Feriados</th>
+        <th colspan="2" class="col-dom">Dom / Feriados</th>
         <th rowspan="2" style="width:36px"></th>
       </tr>
       <tr class="subhead">
@@ -314,7 +314,6 @@
         <th class="col-uteis"><span class="pill pill-green">+60%</span><br><span style="font-size:9px;font-weight:400">25–40h</span></th>
         <th class="col-uteis"><span class="pill pill-green">+80%</span><br><span style="font-size:9px;font-weight:400">40–60h</span></th>
         <th class="col-uteis"><span class="pill pill-green">+100%</span><br><span style="font-size:9px;font-weight:400">> 60h</span></th>
-        <th class="col-dom" style="min-width:62px">Sáb<br><span style="font-size:9px;font-weight:400">horas</span></th>
         <th class="col-dom"><span class="pill pill-amber">+100%</span><br><span style="font-size:9px;font-weight:400">até 8h/dia</span></th>
         <th class="col-dom"><span class="pill pill-amber">+150%</span><br><span style="font-size:9px;font-weight:400">> 8h/dia</span></th>
       </tr>
@@ -326,7 +325,7 @@
 
 <div class="footer-note">
   <div class="footer-dot"></div>
-  Sábado = descanso semanal (DSR) &nbsp;·&nbsp;
+  Sábado entra nas faixas de dias úteis &nbsp;·&nbsp;
   Dias úteis: faixas progressivas 50 / 60 / 80 / 100% &nbsp;·&nbsp;
   Sáb / Dom / Feriados: +100% até 8h diárias · +150% acima de 8h
 </div>
@@ -511,16 +510,17 @@ function render() {
   document.getElementById('count').textContent = funcionarios.length + ' funcionário' + (funcionarios.length !== 1 ? 's' : '');
 
   if (!funcionarios.length) {
-    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:3rem;color:#aaa;font-size:13px">Importe PDFs ou adicione funcionários manualmente.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:3rem;color:#aaa;font-size:13px">Importe PDFs ou adicione funcionários manualmente.</td></tr>`;
     tf.innerHTML = '';
     return;
   }
 
-  let rows = '', tots = { hu: 0, d: [0, 0, 0, 0], hs: 0, hn: 0, hx: 0 };
+  let rows = '', tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0 };
   for (const f of funcionarios) {
-    const d = dist(f.hu), hn = f.hs + f.hd;
-    tots.hu += f.hu; d.forEach((v, i) => tots.d[i] += v);
-    tots.hs += f.hs; tots.hn += hn; tots.hx += f.hde;
+    const huTotal = f.hu + f.hs;
+    const d = dist(huTotal), hn = f.hd;
+    tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
+    tots.hn += hn; tots.hx += f.hde;
     const imp = f.imported ? ' class="imported"' : '';
     const badge = f.imported ? '<span class="badge-pdf">PDF</span>' : '';
     rows += `<tr${imp}>
@@ -528,13 +528,12 @@ function render() {
         <input type="text" value="${f.nome.replace(/"/g, '&quot;')}" oninput="upd(${f.id},'nome',this.value)" style="min-width:180px">
         ${badge}
       </td>
-      <td class="input-cell"><input type="text" value="${f.hu > 0 ? decToHHMM(f.hu) : ''}" placeholder="0:00" oninput="upd(${f.id},'hu',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
+      <td class="val-cell">${fmtH(huTotal) || '—'}</td>
       <td class="val-cell">${fH(d[0])}</td>
       <td class="val-cell">${fH(d[1])}</td>
       <td class="val-cell">${fH(d[2])}</td>
       <td class="val-cell">${fH(d[3])}</td>
-      <td class="input-cell"><input type="text" value="${f.hs > 0 ? decToHHMM(f.hs) : ''}" placeholder="0:00" oninput="upd(${f.id},'hs',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
-      <td class="val-cell">${fH(hn)}</td>
+      <td class="input-cell"><input type="text" value="${f.hd > 0 ? decToHHMM(f.hd) : ''}" placeholder="0:00" oninput="upd(${f.id},'hd',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
       <td class="input-cell"><input type="text" value="${f.hde > 0 ? decToHHMM(f.hde) : ''}" placeholder="0:00" oninput="upd(${f.id},'hde',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
       <td><button class="del-btn" onclick="remove(${f.id})" title="Remover"><i class="ti ti-trash"></i></button></td>
     </tr>`;
@@ -546,7 +545,7 @@ function render() {
     <td style="text-align:left">Total geral</td>
     <td>${fv(tots.hu)}</td>
     <td>${fv(tots.d[0])}</td><td>${fv(tots.d[1])}</td><td>${fv(tots.d[2])}</td><td>${fv(tots.d[3])}</td>
-    <td>${fv(tots.hs)}</td><td>${fv(tots.hn)}</td><td>${fv(tots.hx)}</td>
+    <td>${fv(tots.hn)}</td><td>${fv(tots.hx)}</td>
     <td></td>
   </tr>`;
 }
@@ -581,12 +580,13 @@ function exportPDF() {
   doc.setLineWidth(0.8);
   doc.line(14, 26, W - 14, 26);
 
-  const tots = { hu: 0, d: [0, 0, 0, 0], hs: 0, hn: 0, hx: 0 };
+  const tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0 };
   const body = funcionarios.map(f => {
-    const d = dist(f.hu), hn = f.hs + f.hd;
-    tots.hu += f.hu; d.forEach((v, i) => tots.d[i] += v);
-    tots.hs += f.hs; tots.hn += hn; tots.hx += f.hde;
-    return [f.nome, fHpdf(f.hu), fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]), fHpdf(f.hs), fHpdf(hn), fHpdf(f.hde)];
+    const huTotal = f.hu + f.hs;
+    const d = dist(huTotal), hn = f.hd;
+    tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
+    tots.hn += hn; tots.hx += f.hde;
+    return [f.nome, fHpdf(huTotal), fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]), fHpdf(hn), fHpdf(f.hde)];
   });
 
   doc.autoTable({
@@ -596,14 +596,13 @@ function exportPDF() {
         { content: 'Funcionário', rowSpan: 2, styles: { valign: 'middle', halign: 'left' } },
         { content: 'HE Úteis\nTotal', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
         { content: 'Dias Úteis — Faixas Progressivas', colSpan: 4, styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: 'Sáb / Dom / Feriados', colSpan: 3, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: 'Dom / Feriados', colSpan: 2, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
       ],
       [
         { content: '+50%\n≤25h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: '+60%\n25-40h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: '+80%\n40-60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: '+100%\n>60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: 'Sáb\nhoras', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
         { content: '+100%\naté 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
         { content: '+150%\n>8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
       ]
@@ -612,22 +611,21 @@ function exportPDF() {
     foot: [[
       'TOTAL GERAL', fHpdf(tots.hu),
       fHpdf(tots.d[0]), fHpdf(tots.d[1]), fHpdf(tots.d[2]), fHpdf(tots.d[3]),
-      fHpdf(tots.hs), fHpdf(tots.hn), fHpdf(tots.hx)
+      fHpdf(tots.hn), fHpdf(tots.hx)
     ]],
     theme: 'grid',
     styles: { fontSize: 8, cellPadding: 2.5, font: 'helvetica', textColor: [0, 0, 0] },
     headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
     footStyles: { fillColor: [0, 0, 0], textColor: [72, 213, 151], fontStyle: 'bold', fontSize: 8.5 },
     columnStyles: {
-      0: { cellWidth: 55, halign: 'left' },
-      1: { cellWidth: 16, halign: 'center' },
-      2: { cellWidth: 14, halign: 'center' },
-      3: { cellWidth: 14, halign: 'center' },
-      4: { cellWidth: 14, halign: 'center' },
-      5: { cellWidth: 14, halign: 'center' },
-      6: { cellWidth: 16, halign: 'center' },
+      0: { cellWidth: 65, halign: 'left' },
+      1: { cellWidth: 18, halign: 'center' },
+      2: { cellWidth: 16, halign: 'center' },
+      3: { cellWidth: 16, halign: 'center' },
+      4: { cellWidth: 16, halign: 'center' },
+      5: { cellWidth: 16, halign: 'center' },
+      6: { cellWidth: 20, halign: 'center' },
       7: { cellWidth: 18, halign: 'center' },
-      8: { cellWidth: 16, halign: 'center' },
     },
     alternateRowStyles: { fillColor: [250, 250, 250] },
     margin: { left: 14, right: 14 },
