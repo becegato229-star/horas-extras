@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MUBEC — Controle de Horas Extras</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green: #48D597;
+      --green-light: #e8faf3;
+      --green-dark: #3bc886;
+      --gray: #717C7D;
+      --gray-light: #f4f5f5;
+      --border: #e2e6e6;
+      --amber-bg: #fff8e6;
+      --amber-text: #7a5000;
+      --amber-pill: #FFD166;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; min-height: 100vh; }
+
+    /* HEADER */
+    .header {
+      background: #fff;
+      border-bottom: 2px solid var(--green);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo-wrap { display: flex; align-items: center; gap: 10px; }
+    .logo-box {
+      width: 40px; height: 40px;
+      background: var(--green);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-name { font-size: 20px; font-weight: 900; color: #000; letter-spacing: 1px; }
+    .header-sub { margin-left: auto; font-size: 11px; color: var(--gray); text-align: right; line-height: 1.5; }
+    .api-status {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .api-ok { background: var(--green-light); color: #0a7a4a; }
+    .api-err { background: #fcebeb; color: #a32d2d; }
+
+    /* TOOLBAR */
+    .toolbar {
+      background: var(--gray-light);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px;
+      border-radius: 7px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; border: none;
+      font-family: inherit;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-green { background: var(--green); color: #000; }
+    .btn-green:hover { background: var(--green-dark); }
+    .btn-outline { background: #fff; color: var(--gray); border: 1px solid var(--border); }
+    .btn-outline:hover { background: #f0f0f0; }
+    .btn-black { background: #000; color: #fff; }
+    .btn-black:hover { background: #222; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .count { font-size: 12px; color: var(--gray); margin-left: 4px; }
+
+    /* DROP ZONE */
+    .drop-zone {
+      margin: 20px 24px;
+      border: 2px dashed var(--border);
+      border-radius: 14px;
+      padding: 36px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--green); background: var(--green-light); }
+    .drop-zone .dz-icon { font-size: 40px; color: var(--green); }
+    .drop-zone strong { display: block; font-size: 15px; margin: 8px 0 4px; }
+    .drop-zone p { font-size: 13px; color: var(--gray); }
+    .drop-zone .dz-hint { font-size: 11px; color: #bbb; margin-top: 6px; }
+
+    /* PROGRESS */
+    .progress-wrap { margin: 0 24px 10px; display: none; }
+    .progress-wrap.show { display: block; }
+    .progress-label { font-size: 12px; color: var(--gray); margin-bottom: 5px; }
+    .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--green); width: 0%; transition: width .4s; }
+
+    /* LOG */
+    .log-box {
+      margin: 0 24px 12px;
+      background: var(--gray-light);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      max-height: 100px;
+      overflow-y: auto;
+      display: none;
+      line-height: 1.8;
+    }
+    .log-box.show { display: block; }
+    .log-ok { color: #0a7a4a; }
+    .log-err { color: #a32d2d; }
+
+    /* API KEY CONFIG */
+    .api-config {
+      margin: 0 24px 16px;
+      background: #fff8e6;
+      border: 1px solid #ffe4a0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: none;
+    }
+    .api-config.show { display: block; }
+    .api-config p { font-size: 13px; color: #7a5000; margin-bottom: 8px; }
+    .api-config-row { display: flex; gap: 8px; }
+    .api-input {
+      flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+      border-radius: 6px; font-size: 13px; font-family: monospace;
+    }
+
+    /* TABLE */
+    .table-wrap { overflow-x: auto; padding: 0 24px 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
+
+    thead tr:first-child th {
+      background: #000; color: #fff;
+      font-size: 10px; font-weight: 700;
+      letter-spacing: .07em; text-transform: uppercase;
+      padding: 10px 10px; text-align: center;
+    }
+    thead tr:first-child th:first-child { text-align: left; border-radius: 8px 0 0 0; }
+    thead tr:first-child th:last-child { border-radius: 0 8px 0 0; }
+    thead tr.subhead th {
+      background: var(--gray-light); color: var(--gray);
+      font-size: 10px; font-weight: 600;
+      letter-spacing: .04em; text-transform: uppercase;
+      padding: 7px 10px; text-align: center;
+      border-bottom: 2px solid var(--green);
+    }
+    thead tr.subhead th:first-child { text-align: left; }
+
+    .col-uteis { background: #e6faf3; }
+    .col-dom { background: var(--amber-bg); }
+
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover td { background: #fafafa; }
+    tbody tr.imported { background: #f6fefb; }
+
+    td { padding: 8px 10px; vertical-align: middle; }
+    td:first-child { font-weight: 500; color: #000; font-size: 12px; }
+
+    td input[type="text"] {
+      border: none; background: transparent;
+      font-size: 12px; font-family: inherit; color: #000;
+      padding: 2px 4px; width: 100%; outline: none;
+    }
+    td input[type="number"] {
+      border: none; background: transparent;
+      font-size: 13px; font-family: inherit; color: #000;
+      padding: 2px 4px; width: 60px; text-align: right; outline: none;
+    }
+    td input:focus { background: var(--green-light); border-radius: 4px; }
+
+    .val-cell { text-align: right; font-weight: 500; padding-right: 12px; }
+    .zero { color: #ccc; font-weight: 400; }
+    .input-cell { text-align: right; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+    }
+    .pill-green { background: var(--green); color: #000; }
+    .pill-amber { background: var(--amber-pill); color: var(--amber-text); }
+
+    .badge-pdf {
+      font-size: 9px; font-weight: 700;
+      background: var(--green); color: #000;
+      padding: 1px 6px; border-radius: 8px;
+      margin-left: 6px; vertical-align: middle;
+    }
+
+    tfoot tr td {
+      background: #000; color: #fff;
+      font-weight: 700; font-size: 13px;
+      padding: 10px 10px; text-align: right;
+    }
+    tfoot tr td:first-child { border-radius: 0 0 0 8px; text-align: left; }
+    tfoot tr td:last-child { border-radius: 0 0 8px 0; }
+    .tot-val { color: var(--green); }
+    .tot-zero { color: #555; font-weight: 400; }
+
+    .del-btn {
+      background: none; border: none; cursor: pointer;
+      color: #ccc; font-size: 16px; padding: 2px 6px; border-radius: 4px;
+    }
+    .del-btn:hover { color: #e24b4a; background: #fff0f0; }
+
+    /* FOOTER */
+    .footer-note {
+      padding: 12px 24px 16px;
+      font-size: 11px; color: var(--gray);
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .footer-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-wrap">
+    <div class="logo-box">
+      <svg width="26" height="22" viewBox="0 0 26 22" fill="none">
+        <path d="M2 20V8C2 5.8 3.5 3.9 5.6 3.4L12.4 1.6C12.8 1.5 13.2 1.5 13.6 1.6L20.4 3.4C22.5 3.9 24 5.8 24 8V20" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <rect x="6" y="11" width="3.5" height="9" rx="1" fill="white"/>
+        <rect x="11.25" y="8" width="3.5" height="12" rx="1" fill="white"/>
+        <rect x="16.5" y="11" width="3.5" height="9" rx="1" fill="white"/>
+      </svg>
+    </div>
+    <span class="logo-name">MUBEC</span>
+  </div>
+  <span id="api-badge" class="api-status api-err">verificando API...</span>
+  <div class="header-sub">
+    Controle de Horas Extras<br>
+    CCT Metalúrgicos SP 2024/2025
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="btn btn-green" id="btn-import" onclick="document.getElementById('pdf-input').click()">
+    <i class="ti ti-upload"></i> Importar PDFs
+  </button>
+  <input type="file" id="pdf-input" accept="application/pdf" multiple style="display:none" onchange="handleFiles(this.files)">
+
+  <button class="btn btn-outline" onclick="addManual()">
+    <i class="ti ti-plus"></i> Adicionar manual
+  </button>
+
+  <button class="btn btn-outline" id="btn-cfg" onclick="toggleConfig()">
+    <i class="ti ti-settings"></i> Config. API
+  </button>
+
+  <button class="btn btn-black" onclick="exportPDF()" style="margin-left:auto">
+    <i class="ti ti-file-download"></i> Exportar PDF
+  </button>
+
+  <button class="btn btn-outline" onclick="clearAll()">
+    <i class="ti ti-trash"></i> Limpar
+  </button>
+
+  <span class="count" id="count">0 funcionários</span>
+</div>
+
+<div class="api-config" id="api-config">
+  <p><i class="ti ti-key"></i> &nbsp;Informe sua chave da API Anthropic. Ela fica salva apenas no seu navegador.</p>
+  <div class="api-config-row">
+    <input type="password" id="api-key-input" class="api-input" placeholder="sk-ant-api03-...">
+    <button class="btn btn-green" onclick="saveApiKey()"><i class="ti ti-check"></i> Salvar</button>
+    <button class="btn btn-outline" onclick="toggleConfig()">Cancelar</button>
+  </div>
+</div>
+
+<div class="drop-zone" id="drop-zone" onclick="document.getElementById('pdf-input').click()">
+  <i class="ti ti-file-text dz-icon"></i>
+  <strong>Arraste os PDFs dos espelhos de ponto aqui</strong>
+  <p>ou clique para selecionar — aceita múltiplos arquivos de uma vez</p>
+  <p class="dz-hint">Os PDFs são processados via backend local com IA</p>
+</div>
+
+<div class="progress-wrap" id="progress-wrap">
+  <div class="progress-label" id="progress-label">Aguarde...</div>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+</div>
+<div class="log-box" id="log-box"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2" style="text-align:left;min-width:200px">Funcionário</th>
+        <th rowspan="2" style="min-width:70px">HE Úteis<br>Total</th>
+        <th colspan="4" class="col-uteis">Dias Úteis — Faixas Progressivas</th>
+        <th colspan="3" class="col-dom">Sáb / Dom / Feriados</th>
+        <th rowspan="2" style="width:36px"></th>
+      </tr>
+      <tr class="subhead">
+        <th class="col-uteis"><span class="pill pill-green">+50%</span><br><span style="font-size:9px;font-weight:400">≤ 25h</span></th>
+        <th class="col-uteis"><span class="pill pill-green">+60%</span><br><span style="font-size:9px;font-weight:400">25–40h</span></th>
+        <th class="col-uteis"><span class="pill pill-green">+80%</span><br><span style="font-size:9px;font-weight:400">40–60h</span></th>
+        <th class="col-uteis"><span class="pill pill-green">+100%</span><br><span style="font-size:9px;font-weight:400">> 60h</span></th>
+        <th class="col-dom" style="min-width:62px">Sáb<br><span style="font-size:9px;font-weight:400">horas</span></th>
+        <th class="col-dom"><span class="pill pill-amber">+100%</span><br><span style="font-size:9px;font-weight:400">até 8h/dia</span></th>
+        <th class="col-dom"><span class="pill pill-amber">+150%</span><br><span style="font-size:9px;font-weight:400">> 8h/dia</span></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+    <tfoot id="tfoot"></tfoot>
+  </table>
+</div>
+
+<div class="footer-note">
+  <div class="footer-dot"></div>
+  Sábado = descanso semanal (DSR) &nbsp;·&nbsp;
+  Dias úteis: faixas progressivas 50 / 60 / 80 / 100% &nbsp;·&nbsp;
+  Sáb / Dom / Feriados: +100% até 8h diárias · +150% acima de 8h
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let funcionarios = [], idSeq = 0, processing = false;
+
+// ── API KEY (localStorage) ──────────────────────────────────────
+function getApiKey() { return localStorage.getItem('anthropic_api_key') || ''; }
+function saveApiKey() {
+  const val = document.getElementById('api-key-input').value.trim();
+  if (!val) return alert('Informe uma chave válida.');
+  localStorage.setItem('anthropic_api_key', val);
+  toggleConfig();
+  checkHealth();
+}
+function toggleConfig() {
+  const el = document.getElementById('api-config');
+  el.classList.toggle('show');
+  if (el.classList.contains('show')) {
+    document.getElementById('api-key-input').value = getApiKey();
+  }
+}
+
+// ── HEALTH CHECK ────────────────────────────────────────────────
+async function checkHealth() {
+  const badge = document.getElementById('api-badge');
+  try {
+    const r = await fetch(API_BASE + '/api/health');
+    const d = await r.json();
+    if (d.api_key_configured) {
+      badge.textContent = '● API conectada';
+      badge.className = 'api-status api-ok';
+    } else {
+      badge.textContent = '⚠ Configure a API key';
+      badge.className = 'api-status api-err';
+    }
+  } catch {
+    badge.textContent = '⚠ Backend offline';
+    badge.className = 'api-status api-err';
+  }
+}
+checkHealth();
+
+// ── DRAG & DROP ─────────────────────────────────────────────────
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+
+// ── LOG ─────────────────────────────────────────────────────────
+function log(msg, type = '') {
+  const lb = document.getElementById('log-box');
+  lb.classList.add('show');
+  const d = document.createElement('div');
+  if (type) d.className = 'log-' + type;
+  d.textContent = msg;
+  lb.appendChild(d);
+  lb.scrollTop = lb.scrollHeight;
+}
+
+// ── IMPORT PDFs ─────────────────────────────────────────────────
+async function handleFiles(files) {
+  if (processing) return;
+  const arr = Array.from(files || []).filter(f => f.type === 'application/pdf');
+  if (!arr.length) return;
+
+  processing = true;
+  dz.style.display = 'none';
+  document.getElementById('btn-import').disabled = true;
+  const pw = document.getElementById('progress-wrap');
+  const pf = document.getElementById('progress-fill');
+  const pl = document.getElementById('progress-label');
+  pw.classList.add('show');
+
+  for (let i = 0; i < arr.length; i++) {
+    const f = arr[i];
+    pl.textContent = `Processando ${i + 1}/${arr.length}: ${f.name}`;
+    pf.style.width = ((i / arr.length) * 100) + '%';
+    try {
+      const form = new FormData();
+      form.append('file', f);
+
+      // envia API key no header se configurada localmente
+      const headers = {};
+      const localKey = getApiKey();
+      if (localKey) headers['X-API-Key'] = localKey;
+
+      const r = await fetch(API_BASE + '/api/parse-pdf', { method: 'POST', body: form, headers });
+      if (!r.ok) {
+        const err = await r.json();
+        throw new Error(err.detail || r.statusText);
+      }
+      const data = await r.json();
+      const ex = funcionarios.find(x => norm(x.nome) === norm(data.nome));
+      if (ex) {
+        Object.assign(ex, { hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, imported: true });
+        log('✓ Atualizado: ' + data.nome, 'ok');
+      } else {
+        funcionarios.push({ id: ++idSeq, nome: data.nome, hu: data.he_uteis, hs: data.he_sabado, hd: data.he_feriado, hde: data.he_acima8h, imported: true });
+        log('✓ Importado: ' + data.nome, 'ok');
+      }
+      render();
+    } catch (e) {
+      log('✗ Erro: ' + f.name + ' — ' + e.message, 'err');
+    }
+  }
+
+  pf.style.width = '100%';
+  pl.textContent = 'Concluído — ' + arr.length + ' arquivo(s) processado(s)';
+  setTimeout(() => pw.classList.remove('show'), 3000);
+  document.getElementById('pdf-input').value = '';
+  document.getElementById('btn-import').disabled = false;
+  processing = false;
+}
+
+// ── HELPERS ─────────────────────────────────────────────────────
+function norm(s) { return (s || '').toUpperCase().replace(/\s+/g, ' ').trim(); }
+
+function addManual() {
+  funcionarios.push({ id: ++idSeq, nome: '', hu: 0, hs: 0, hd: 0, hde: 0, imported: false });
+  render();
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#tbody tr');
+    const last = rows[rows.length - 1];
+    if (last) { const i = last.querySelector('input[type="text"]'); if (i) i.focus(); }
+  }, 40);
+}
+
+function clearAll() {
+  if (funcionarios.length && !confirm('Limpar todos os funcionários?')) return;
+  funcionarios = [];
+  document.getElementById('log-box').innerHTML = '';
+  document.getElementById('log-box').classList.remove('show');
+  dz.style.display = '';
+  render();
+}
+
+function remove(id) { funcionarios = funcionarios.filter(f => f.id !== id); render(); }
+function upd(id, field, val) {
+  const f = funcionarios.find(x => x.id === id);
+  if (f) f[field] = field === 'nome' ? val : (parseFloat(val) || 0);
+  render();
+}
+
+function dist(hu) {
+  const fx = [{ max: 25 }, { max: 40 }, { max: 60 }, { max: Infinity }];
+  let res = [], rest = hu, ac = 0;
+  for (const f of fx) {
+    const lim = f.max === Infinity ? rest : Math.max(0, f.max - ac);
+    const h = Math.min(rest, lim);
+    res.push(h);
+    rest = Math.max(0, rest - h);
+    if (f.max !== Infinity) ac = Math.min(ac + h, f.max);
+  }
+  return res;
+}
+
+function fmtH(v) {
+  if (!v || v <= 0) return null;
+  const h = Math.floor(v), m = Math.round((v - h) * 60);
+  return m === 0 ? h + 'h' : h + 'h' + String(m).padStart(2, '0');
+}
+function fH(v) { const s = fmtH(v); return s ? s : '<span class="zero">—</span>'; }
+function fHpdf(v) { return fmtH(v) || '—'; }
+
+// ── RENDER TABLE ─────────────────────────────────────────────────
+function render() {
+  const tb = document.getElementById('tbody');
+  const tf = document.getElementById('tfoot');
+  document.getElementById('count').textContent = funcionarios.length + ' funcionário' + (funcionarios.length !== 1 ? 's' : '');
+
+  if (!funcionarios.length) {
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:3rem;color:#aaa;font-size:13px">Importe PDFs ou adicione funcionários manualmente.</td></tr>`;
+    tf.innerHTML = '';
+    return;
+  }
+
+  let rows = '', tots = { hu: 0, d: [0, 0, 0, 0], hs: 0, hn: 0, hx: 0 };
+  for (const f of funcionarios) {
+    const d = dist(f.hu), hn = f.hs + f.hd;
+    tots.hu += f.hu; d.forEach((v, i) => tots.d[i] += v);
+    tots.hs += f.hs; tots.hn += hn; tots.hx += f.hde;
+    const imp = f.imported ? ' class="imported"' : '';
+    const badge = f.imported ? '<span class="badge-pdf">PDF</span>' : '';
+    rows += `<tr${imp}>
+      <td style="white-space:nowrap">
+        <input type="text" value="${f.nome.replace(/"/g, '&quot;')}" oninput="upd(${f.id},'nome',this.value)" style="min-width:180px">
+        ${badge}
+      </td>
+      <td class="input-cell"><input type="number" min="0" step="0.01" value="${f.hu > 0 ? f.hu.toFixed(2) : ''}" placeholder="0" oninput="upd(${f.id},'hu',this.value)"></td>
+      <td class="val-cell">${fH(d[0])}</td>
+      <td class="val-cell">${fH(d[1])}</td>
+      <td class="val-cell">${fH(d[2])}</td>
+      <td class="val-cell">${fH(d[3])}</td>
+      <td class="input-cell"><input type="number" min="0" step="0.01" value="${f.hs > 0 ? f.hs.toFixed(2) : ''}" placeholder="0" oninput="upd(${f.id},'hs',this.value)"></td>
+      <td class="val-cell">${fH(hn)}</td>
+      <td class="input-cell"><input type="number" min="0" step="0.01" value="${f.hde > 0 ? f.hde.toFixed(2) : ''}" placeholder="0" oninput="upd(${f.id},'hde',this.value)"></td>
+      <td><button class="del-btn" onclick="remove(${f.id})" title="Remover"><i class="ti ti-trash"></i></button></td>
+    </tr>`;
+  }
+  tb.innerHTML = rows;
+
+  const fv = v => { const s = fmtH(v); return s ? `<span class="tot-val">${s}</span>` : `<span class="tot-zero">—</span>`; };
+  tf.innerHTML = `<tr>
+    <td style="text-align:left">Total geral</td>
+    <td>${fv(tots.hu)}</td>
+    <td>${fv(tots.d[0])}</td><td>${fv(tots.d[1])}</td><td>${fv(tots.d[2])}</td><td>${fv(tots.d[3])}</td>
+    <td>${fv(tots.hs)}</td><td>${fv(tots.hn)}</td><td>${fv(tots.hx)}</td>
+    <td></td>
+  </tr>`;
+}
+
+// ── EXPORT PDF ───────────────────────────────────────────────────
+function exportPDF() {
+  if (!funcionarios.length) { alert('Nenhum funcionário na tabela.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+
+  // logo
+  doc.setFillColor(72, 213, 151);
+  doc.roundedRect(14, 10, 22, 13, 3, 3, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.text('M', 25, 19, { align: 'center' });
+
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(17);
+  doc.text('MUBEC', 39, 19);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(113, 124, 125);
+  doc.text('Controle de Horas Extras — CCT Metalúrgicos SP 2024/2025', W - 14, 13, { align: 'right' });
+  const now = new Date();
+  doc.text('Gerado em: ' + now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), W - 14, 19, { align: 'right' });
+
+  doc.setDrawColor(72, 213, 151);
+  doc.setLineWidth(0.8);
+  doc.line(14, 26, W - 14, 26);
+
+  const tots = { hu: 0, d: [0, 0, 0, 0], hs: 0, hn: 0, hx: 0 };
+  const body = funcionarios.map(f => {
+    const d = dist(f.hu), hn = f.hs + f.hd;
+    tots.hu += f.hu; d.forEach((v, i) => tots.d[i] += v);
+    tots.hs += f.hs; tots.hn += hn; tots.hx += f.hde;
+    return [f.nome, fHpdf(f.hu), fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]), fHpdf(f.hs), fHpdf(hn), fHpdf(f.hde)];
+  });
+
+  doc.autoTable({
+    startY: 29,
+    head: [
+      [
+        { content: 'Funcionário', rowSpan: 2, styles: { valign: 'middle', halign: 'left' } },
+        { content: 'HE Úteis\nTotal', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+        { content: 'Dias Úteis — Faixas Progressivas', colSpan: 4, styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: 'Sáb / Dom / Feriados', colSpan: 3, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+      ],
+      [
+        { content: '+50%\n≤25h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+60%\n25-40h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+80%\n40-60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+100%\n>60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: 'Sáb\nhoras', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+100%\naté 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+150%\n>8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+      ]
+    ],
+    body: body,
+    foot: [[
+      'TOTAL GERAL', fHpdf(tots.hu),
+      fHpdf(tots.d[0]), fHpdf(tots.d[1]), fHpdf(tots.d[2]), fHpdf(tots.d[3]),
+      fHpdf(tots.hs), fHpdf(tots.hn), fHpdf(tots.hx)
+    ]],
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 2.5, font: 'helvetica', textColor: [0, 0, 0] },
+    headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+    footStyles: { fillColor: [0, 0, 0], textColor: [72, 213, 151], fontStyle: 'bold', fontSize: 8.5 },
+    columnStyles: {
+      0: { cellWidth: 55, halign: 'left' },
+      1: { cellWidth: 16, halign: 'center' },
+      2: { cellWidth: 14, halign: 'center' },
+      3: { cellWidth: 14, halign: 'center' },
+      4: { cellWidth: 14, halign: 'center' },
+      5: { cellWidth: 14, halign: 'center' },
+      6: { cellWidth: 16, halign: 'center' },
+      7: { cellWidth: 18, halign: 'center' },
+      8: { cellWidth: 16, halign: 'center' },
+    },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    margin: { left: 14, right: 14 },
+  });
+
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setTextColor(180, 180, 180);
+    doc.text(
+      'Sábado = descanso semanal (DSR)  ·  Dias úteis: faixas progressivas 50/60/80/100%  ·  Sáb/Dom/Feriados: +100% até 8h  ·  +150% acima de 8h',
+      14, doc.internal.pageSize.getHeight() - 6
+    );
+    doc.text('Pág. ' + i + '/' + pageCount, W - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
+  }
+
+  doc.save('MUBEC_HorasExtras_' + now.toISOString().slice(0, 10) + '.pdf');
+}
+
+render();
+</script>
+</body>
+</html>
