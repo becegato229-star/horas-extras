@@ -625,25 +625,18 @@ function exportPDF() {
     head: [
       [
         { content: 'Funcionário', rowSpan: 2, styles: { valign: 'middle', halign: 'left' } },
-        { content: 'HE Úteis
-Total', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+        { content: 'HE Úteis\nTotal', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
         { content: 'Dias Úteis — Faixas Progressivas', colSpan: 4, styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: 'Dom / Feriados', colSpan: 2, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
         { content: 'H. Descontadas', rowSpan: 2, styles: { valign: 'middle', halign: 'center', fillColor: [252, 232, 232], textColor: [163, 45, 45] } },
       ],
       [
-        { content: '+50%
-≤25h',    styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+60%
-25-40h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+80%
-40-60h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+100%
->60h',   styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+100%
-ate 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
-        { content: '+150%
->8h/dia',    styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+50%\n≤25h',    styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+60%\n25-40h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+80%\n40-60h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+100%\n>60h',   styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+100%\nate 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+150%\n>8h/dia',    styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
       ]
     ],
     body: body,
