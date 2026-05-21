@@ -33,15 +33,32 @@ Analise o texto abaixo extraído de um espelho de ponto e extraia:
 REGRAS IMPORTANTES:
 - Use os campos do resumo "Horas a Pagar ou Descontar" como fonte principal para HE úteis e feriados
 - Para sábados (DUNT): some manualmente as horas positivas de cada dia DUNT que teve marcação de ponto
-- Converta para decimal: 5h22 = 5 + 22/60 ≈ 5.367, 5h32 = 5 + 32/60 ≈ 5.533
+- Converta para decimal: 5h22 = 5 + 22/60 = 5.367, 5h32 = 5 + 32/60 = 5.533
 - Se um campo não existe ou é zero, retorne 0
-- Retorne SOMENTE JSON válido, sem texto adicional, sem markdown, sem ```
+- Retorne SOMENTE JSON puro, sem markdown, sem aspas especiais, sem texto antes ou depois
 
-Formato de resposta:
+Formato EXATO de resposta (use aspas duplas simples):
 {"nome":"NOME COMPLETO","he_uteis":0.0,"he_sabado":0.0,"he_feriado":0.0,"he_acima8h":0.0}
 
 Texto do espelho de ponto:
 {texto}"""
+
+
+def clean_json(raw: str) -> str:
+    """Limpa artefatos comuns da resposta do Gemini antes de parsear."""
+    # aspas tipográficas
+    raw = raw.replace("\u201c", '"').replace("\u201d", '"')
+    raw = raw.replace("\u2018", "'").replace("\u2019", "'")
+    # blocos markdown
+    raw = raw.replace("```json", "").replace("```", "")
+    # espaços e quebras extras
+    raw = raw.strip()
+    # extrair só o JSON se houver texto antes/depois
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+    return raw
 
 
 @app.post("/api/parse-pdf")
@@ -63,17 +80,20 @@ async def parse_pdf(file: UploadFile = File(...)):
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            generation_config={"response_mime_type": "application/json"}
+        )
         response = model.generate_content(PROMPT_TEMPLATE.format(texto=texto[:4000]))
-        raw = response.text.strip().replace("```json", "").replace("```", "").strip()
+        raw = clean_json(response.text)
         data = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Resposta da IA não é JSON válido")
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON inválido na resposta da IA: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na API Gemini: {str(e)}")
 
     return {
-        "nome": data.get("nome", ""),
+        "nome": str(data.get("nome", "")),
         "he_uteis": float(data.get("he_uteis", 0)),
         "he_sabado": float(data.get("he_sabado", 0)),
         "he_feriado": float(data.get("he_feriado", 0)),
