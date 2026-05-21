@@ -37,6 +37,7 @@ def extract_data(text: str) -> dict:
         "he_sabado": 0.0,
         "he_feriado": 0.0,
         "he_acima8h": 0.0,
+        "horas_desconto": 0.0,
     }
 
     # ── Nome ──────────────────────────────────────────────────────
@@ -77,6 +78,14 @@ def extract_data(text: str) -> dict:
     he_uteis_vals = [v for v, cnt in contagem.items() if cnt == 2 and v != feriado_str]
     result["he_uteis"] = round(sum(parse_min(v) for v in he_uteis_vals) / 60, 4)
 
+    # ── Total Horas a Descontar ─────────────────────────────────
+    desconto_match = re.search(
+        r"Total\s+Horas?\s+a\s+Descontar[^\d]*(\d{1,3}:\d{2})",
+        text, re.IGNORECASE
+    )
+    if desconto_match:
+        result["horas_desconto"] = parse_hhmm(desconto_match.group(1))
+
     return result
 
 
@@ -105,6 +114,7 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_sabado": data["he_sabado"],
         "he_feriado": data["he_feriado"],
         "he_acima8h": data["he_acima8h"],
+        "horas_desconto": data["horas_desconto"],
     }
 
 
