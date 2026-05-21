@@ -528,13 +528,13 @@ function render() {
         <input type="text" value="${f.nome.replace(/"/g, '&quot;')}" oninput="upd(${f.id},'nome',this.value)" style="min-width:180px">
         ${badge}
       </td>
-      <td class="val-cell">${fmtH(huTotal) || '—'}</td>
+      <td class="val-cell">${fH(huTotal)}</td>
       <td class="val-cell">${fH(d[0])}</td>
       <td class="val-cell">${fH(d[1])}</td>
       <td class="val-cell">${fH(d[2])}</td>
       <td class="val-cell">${fH(d[3])}</td>
-      <td class="input-cell"><input type="text" value="${f.hd > 0 ? decToHHMM(f.hd) : ''}" placeholder="0:00" oninput="upd(${f.id},'hd',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
-      <td class="input-cell"><input type="text" value="${f.hde > 0 ? decToHHMM(f.hde) : ''}" placeholder="0:00" oninput="upd(${f.id},'hde',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
+      <td class="input-cell"><input type="text" value="${f.hd > 0 ? decToHHMM(f.hd) : ''}" placeholder="—" oninput="upd(${f.id},'hd',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
+      <td class="input-cell"><input type="text" value="${f.hde > 0 ? decToHHMM(f.hde) : ''}" placeholder="—" oninput="upd(${f.id},'hde',HHMMtoDec(this.value))" style="width:58px;text-align:center"></td>
       <td><button class="del-btn" onclick="remove(${f.id})" title="Remover"><i class="ti ti-trash"></i></button></td>
     </tr>`;
   }
@@ -557,54 +557,78 @@ function exportPDF() {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
 
-  // logo
+  const now = new Date();
+
+  // ── Cabeçalho ────────────────────────────────────────────────
+  // Logo: ícone com barras em vez de "M"
   doc.setFillColor(72, 213, 151);
-  doc.roundedRect(14, 10, 22, 13, 3, 3, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text('M', 25, 19, { align: 'center' });
+  doc.roundedRect(14, 9, 14, 14, 2.5, 2.5, 'F');
+  // barras do ícone
+  doc.setFillColor(255, 255, 255);
+  doc.rect(16.5, 15, 2.5, 6, 'F');
+  doc.rect(20,   13, 2.5, 8, 'F');
+  doc.rect(23.5, 15, 2.5, 6, 'F');
+  // telhado
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(1.2);
+  doc.lines([[4.5, -3], [4.5, 3]], 16.5, 12);
 
   doc.setTextColor(0, 0, 0);
-  doc.setFontSize(17);
-  doc.text('MUBEC', 39, 19);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('MUBEC', 31, 18.5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(113, 124, 125);
   doc.text('Controle de Horas Extras — CCT Metalúrgicos SP 2024/2025', W - 14, 13, { align: 'right' });
-  const now = new Date();
   doc.text('Gerado em: ' + now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), W - 14, 19, { align: 'right' });
 
   doc.setDrawColor(72, 213, 151);
   doc.setLineWidth(0.8);
   doc.line(14, 26, W - 14, 26);
 
+  // ── Dados ─────────────────────────────────────────────────────
   const tots = { hu: 0, d: [0, 0, 0, 0], hn: 0, hx: 0 };
   const body = funcionarios.map(f => {
     const huTotal = f.hu + f.hs;
     const d = dist(huTotal), hn = f.hd;
     tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
     tots.hn += hn; tots.hx += f.hde;
-    return [f.nome, fHpdf(huTotal), fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]), fHpdf(hn), fHpdf(f.hde)];
+    return [
+      f.nome,
+      fHpdf(huTotal),
+      fHpdf(d[0]), fHpdf(d[1]), fHpdf(d[2]), fHpdf(d[3]),
+      fHpdf(hn), fHpdf(f.hde)
+    ];
   });
+
+  // largura disponível para autoTable
+  const pageW = W - 28; // margens 14 cada lado
 
   doc.autoTable({
     startY: 29,
     head: [
       [
         { content: 'Funcionário', rowSpan: 2, styles: { valign: 'middle', halign: 'left' } },
-        { content: 'HE Úteis\nTotal', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
+        { content: 'HE Úteis
+Total', rowSpan: 2, styles: { valign: 'middle', halign: 'center' } },
         { content: 'Dias Úteis — Faixas Progressivas', colSpan: 4, styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
         { content: 'Dom / Feriados', colSpan: 2, styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
       ],
       [
-        { content: '+50%\n≤25h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+60%\n25-40h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+80%\n40-60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+100%\n>60h', styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
-        { content: '+100%\naté 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
-        { content: '+150%\n>8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+50%
+≤25h',    styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+60%
+25-40h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+80%
+40-60h',  styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+100%
+>60h',   styles: { halign: 'center', fillColor: [230, 250, 243], textColor: [10, 122, 74] } },
+        { content: '+100%
+ate 8h/dia', styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
+        { content: '+150%
+>8h/dia',    styles: { halign: 'center', fillColor: [255, 248, 230], textColor: [133, 79, 11] } },
       ]
     ],
     body: body,
@@ -614,33 +638,41 @@ function exportPDF() {
       fHpdf(tots.hn), fHpdf(tots.hx)
     ]],
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2.5, font: 'helvetica', textColor: [0, 0, 0] },
-    headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
-    footStyles: { fillColor: [0, 0, 0], textColor: [72, 213, 151], fontStyle: 'bold', fontSize: 8.5 },
+    styles: { fontSize: 8.5, cellPadding: 3, font: 'helvetica', textColor: [30, 30, 30], valign: 'middle' },
+    headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, minCellHeight: 8 },
+    footStyles: { fillColor: [0, 0, 0], textColor: [72, 213, 151], fontStyle: 'bold', fontSize: 9 },
     columnStyles: {
-      0: { cellWidth: 65, halign: 'left' },
-      1: { cellWidth: 18, halign: 'center' },
-      2: { cellWidth: 16, halign: 'center' },
-      3: { cellWidth: 16, halign: 'center' },
-      4: { cellWidth: 16, halign: 'center' },
-      5: { cellWidth: 16, halign: 'center' },
-      6: { cellWidth: 20, halign: 'center' },
-      7: { cellWidth: 18, halign: 'center' },
+      0: { cellWidth: 'auto', halign: 'left' },
+      1: { cellWidth: 20, halign: 'center' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 18, halign: 'center' },
+      4: { cellWidth: 18, halign: 'center' },
+      5: { cellWidth: 18, halign: 'center' },
+      6: { cellWidth: 22, halign: 'center' },
+      7: { cellWidth: 20, halign: 'center' },
     },
-    alternateRowStyles: { fillColor: [250, 250, 250] },
+    alternateRowStyles: { fillColor: [248, 254, 251] },
     margin: { left: 14, right: 14 },
+    tableWidth: pageW,
+    didParseCell: function(data) {
+      // garantir alinhamento correto do cabeçalho
+      if (data.section === 'head') {
+        data.cell.styles.valign = 'middle';
+      }
+    }
   });
 
+  // ── Rodapé de página ──────────────────────────────────────────
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(7);
     doc.setTextColor(180, 180, 180);
     doc.text(
-      'Sábado = descanso semanal (DSR)  ·  Dias úteis: faixas progressivas 50/60/80/100%  ·  Sáb/Dom/Feriados: +100% até 8h  ·  +150% acima de 8h',
+      'Sabado entra nas faixas progressivas de dias uteis  |  Dom/Feriados: +100% ate 8h diarias  |  +150% acima de 8h  |  CCT Metalurgicos SP 2024/2025',
       14, doc.internal.pageSize.getHeight() - 6
     );
-    doc.text('Pág. ' + i + '/' + pageCount, W - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
+    doc.text('Pag. ' + i + '/' + pageCount, W - 14, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
   }
 
   doc.save('MUBEC_HorasExtras_' + now.toISOString().slice(0, 10) + '.pdf');
