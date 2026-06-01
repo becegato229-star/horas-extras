@@ -125,7 +125,7 @@ def extract_all(pdf_bytes: bytes) -> dict:
 
         # Atrasos e Faltas (positivos — faltas não justificadas)
         # Ignorar se houver Atestado Médico na coluna Eventos da mesma linha
-        eventos = val_at(640, 850)
+        eventos = val_at(641, 850)  # v2.1: range ajustado para evitar sobreposição com debito_col
         if af and re.match(r"\d{1,2}:\d{2}", af) and not re.search(r"[Aa]testado", eventos or ""):
             total_af += parse_min(af)
 
@@ -177,7 +177,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 @app.get("/api/health")
 def health():
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True},
+        content={"status": "ok", "api_key_configured": True, "version": "2.1-filtro-atestado"},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
