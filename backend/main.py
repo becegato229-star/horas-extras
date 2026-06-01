@@ -75,6 +75,14 @@ def extract_all(pdf_bytes: bytes) -> dict:
 
     he_uteis = he_sabado = he_feriado = total_af = total_debito = 0
 
+    # Pré-indexar textos de eventos (x > 600) por Y com tolerância
+    # Necessário porque o pdfminer pode colocar o texto em Y ligeiramente diferente
+    eventos_por_y = {}  # y -> texto do evento
+    for item in items:
+        if item["x"] > 600 and item["text"] and not re.match(r"\d{1,2}:\d{2}", item["text"]):
+            y_round = round(item["y"] / 10) * 10  # arredondar para dezena mais próxima
+            eventos_por_y[y_round] = item["text"]
+
     for y in sorted(linhas.keys(), reverse=True):
         linha = sorted(linhas[y], key=lambda i: i["x"])
         textos = [i["text"] for i in linha]
@@ -125,13 +133,18 @@ def extract_all(pdf_bytes: bytes) -> dict:
 
         # Atrasos e Faltas (positivos — faltas não justificadas)
         # Ignorar se houver Atestado Médico na coluna Eventos da mesma linha
-        eventos = val_at(641, 850)
-        if af and re.match(r"\d{1,2}:\d{2}", af):
-            tem_atestado = bool(re.search(r"[Aa]testado", eventos or ""))
-            if not tem_atestado:
-                total_af += parse_min(af)
-            else:
-                pass  # ignorado: atestado médico
+        # Verificar se há evento na coluna de Eventos (x > 600)
+        # Busca na mesma linha E por Y aproximado (pdfminer pode variar)
+        tem_evento_linha = any(
+            i["x"] > 600 and i["text"] and not re.match(r"\d{1,2}:\d{2}", i["text"])
+            for i in linha
+        )
+        y_round = round(y / 10) * 10
+        tem_evento_idx = y_round in eventos_por_y
+        tem_evento = tem_evento_linha or tem_evento_idx
+
+        if af and re.match(r"\d{1,2}:\d{2}", af) and not tem_evento:
+            total_af += parse_min(af)
 
         # Débitos negativos (atrasos/saídas antecipadas explícitos)
         if debito_col and re.match(r"-\d{1,2}:\d{2}", debito_col):
@@ -168,17 +181,6 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
-    # Debug: todos os textos com x > 550 (coluna eventos)
-    eventos_items = []
-    for page_layout in extract_pages(io.BytesIO(contents)):
-        for element in page_layout:
-            if isinstance(element, LTTextBox):
-                for line in element:
-                    if isinstance(line, LTTextLine):
-                        txt = line.get_text().strip()
-                        if txt and round(line.x0) > 550:
-                            eventos_items.append({"x": round(line.x0), "y": round(line.y0,1), "t": txt})
-
     return {
         "nome":           data["nome"],
         "he_uteis":       data["he_uteis"],
@@ -186,7 +188,6 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_feriado":     data["he_feriado"],
         "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
-        "_eventos": sorted(eventos_items, key=lambda i: -i["y"])[:30],
     }
 
 
@@ -194,7 +195,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 def health():
     import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "2.7", "pdfminer": pdfminer.__version__},
+        content={"status": "ok", "api_key_configured": True, "version": "3.0-final", "pdfminer": pdfminer.__version__},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
