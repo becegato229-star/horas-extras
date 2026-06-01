@@ -87,8 +87,8 @@ def extract_all(pdf_bytes: bytes) -> dict:
         if not tipo or tipo == "FOLG":
             continue
 
-        def val_at(x_min, x_max):
-            for i in sorted(linha, key=lambda i: i["x"]):
+        def val_at(x_min, x_max, _linha=linha):
+            for i in sorted(_linha, key=lambda i: i["x"]):
                 if x_min <= i["x"] <= x_max:
                     return i["text"]
             return ""
@@ -109,7 +109,8 @@ def extract_all(pdf_bytes: bytes) -> dict:
 
         # Descontar AF apenas se coluna Eventos (x > 600) estiver VAZIA
         # Se houver qualquer texto em Eventos (Atestado, Feriado, etc.) nao descontar
-        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in linha)
+        _linha_local = linha[:]
+        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in _linha_local)
         if af and re.match(r"\d{1,2}:\d{2}", af) and coluna_eventos_vazia:
             total_af += parse_min(af)
 
@@ -161,7 +162,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 @app.get("/api/health")
 def health():
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "4.0"},
+        content={"status": "ok", "api_key_configured": True, "version": "4.1"},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
