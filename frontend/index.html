@@ -530,7 +530,7 @@ function render() {
     const huTotal = f.hu + f.hs;
     const d = dist(huTotal), hn = f.hd;
     tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
-    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0); tots.hd_desc += (f.hd_desc || 0);
+    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0);
     const imp = f.imported ? ' class="imported"' : '';
     const badge = f.imported ? '<span class="badge-pdf">PDF</span>' : '';
     rows += `<tr${imp}>
@@ -607,7 +607,7 @@ function exportPDF() {
     const huTotal = f.hu + f.hs;
     const d = dist(huTotal), hn = f.hd;
     tots.hu += huTotal; d.forEach((v, i) => tots.d[i] += v);
-    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0); tots.hd_desc += (f.hd_desc || 0);
+    tots.hn += hn; tots.hx += f.hde; tots.hd_desc += (f.hd_desc || 0);
     return [
       f.nome,
       fHpdf(huTotal),
