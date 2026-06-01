@@ -30,26 +30,6 @@ def parse_min(s: str) -> int:
 
 
 def extract_all(pdf_bytes: bytes) -> dict:
-    """
-    Extrai HE e descontos lendo as colunas do espelho de ponto por coordenada X:
-
-      x ~32  → Data (pode incluir tipo: '16 mai., sáb. DUNT')
-      x ~82  → Tipo Dia (TRAB/DUNT/FERIADO/FOLG quando separado)
-      x ~123 → Jornada Esperada
-      x ~208 → Marcações Originais (quando separado) ou mesclado com jornada em x~123
-      x ~455 → Horas Positivas  → HE a pagar
-      x ~509 → Atrasos e Faltas → desconto (faltas / atrasos não cobertos pelo Débito)
-      x ~601 → Débito            → desconto (saídas antecipadas, atrasos explícitos)
-      x ~638 → Crédito (duplicata das HP — não usada)
-      x ~693 → Eventos (Atestado Médico, Feriado, etc.)
-
-    Lógica:
-      HE úteis  = soma coluna x455 para dias TRAB
-      HE sábado = soma coluna x455 para dias DUNT
-      HE feriado= soma coluna x455 para dias FERIADO
-      Desconto  = soma coluna x509 (Atrasos e Faltas) + soma |coluna x601| (Débito)
-      Atestado Médico: não gera valor em x509, portanto é automaticamente ignorado
-    """
     result = {
         "nome": "",
         "he_uteis": 0.0,
@@ -67,21 +47,17 @@ def extract_all(pdf_bytes: bytes) -> dict:
                     if isinstance(line, LTTextLine):
                         txt = line.get_text().strip()
                         if txt:
-                            items.append({"text": txt, "x": round(line.x0), "y": round(line.y0, 1)})
+                            items.append({
+                                "text": txt,
+                                "x": round(line.x0),
+                                "y": round(line.y0, 1),
+                            })
 
     linhas = defaultdict(list)
     for item in items:
         linhas[item["y"]].append(item)
 
     he_uteis = he_sabado = he_feriado = total_af = total_debito = 0
-
-    # Pré-indexar textos de eventos (x > 600) por Y com tolerância
-    # Necessário porque o pdfminer pode colocar o texto em Y ligeiramente diferente
-    eventos_por_y = {}  # y -> texto do evento
-    for item in items:
-        if item["x"] > 600 and item["text"] and not re.match(r"\d{1,2}:\d{2}", item["text"]):
-            y_round = round(item["y"] / 10) * 10  # arredondar para dezena mais próxima
-            eventos_por_y[y_round] = item["text"]
 
     for y in sorted(linhas.keys(), reverse=True):
         linha = sorted(linhas[y], key=lambda i: i["x"])
@@ -95,7 +71,7 @@ def extract_all(pdf_bytes: bytes) -> dict:
                     result["nome"] = nm.group(1).strip()
                     break
 
-        # Detectar data e tipo (separados ou embutidos)
+        # Detectar data e tipo
         data_match = next((t for t in textos if re.match(r"\d{2} \w+\.,", t)), None)
         if not data_match:
             continue
@@ -117,9 +93,9 @@ def extract_all(pdf_bytes: bytes) -> dict:
                     return i["text"]
             return ""
 
-        hp         = val_at(435, 492)  # Horas Positivas (HE): x~439-477
-        af         = val_at(493, 535)  # Atrasos e Faltas: x~496-509
-        debito_col = val_at(570, 640)  # Débito (negativo): x~601
+        hp  = val_at(435, 492)   # Horas Positivas
+        af  = val_at(493, 535)   # Atrasos e Faltas
+        deb = val_at(570, 640)   # Debito (negativo)
 
         # HE por tipo de dia
         if hp and re.match(r"\d{1,2}:\d{2}", hp):
@@ -131,24 +107,15 @@ def extract_all(pdf_bytes: bytes) -> dict:
             elif tipo == "FERIADO":
                 he_feriado += mins
 
-        # Atrasos e Faltas (positivos — faltas não justificadas)
-        # Ignorar se houver Atestado Médico na coluna Eventos da mesma linha
-        # Verificar se há evento na coluna de Eventos (x > 600)
-        # Busca na mesma linha E por Y aproximado (pdfminer pode variar)
-        tem_evento_linha = any(
-            i["x"] > 600 and i["text"] and not re.match(r"\d{1,2}:\d{2}", i["text"])
-            for i in linha
-        )
-        y_round = round(y / 10) * 10
-        tem_evento_idx = y_round in eventos_por_y
-        tem_evento = tem_evento_linha or tem_evento_idx
-
-        if af and re.match(r"\d{1,2}:\d{2}", af) and not tem_evento:
+        # Descontar AF apenas se coluna Eventos (x > 600) estiver VAZIA
+        # Se houver qualquer texto em Eventos (Atestado, Feriado, etc.) nao descontar
+        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in linha)
+        if af and re.match(r"\d{1,2}:\d{2}", af) and coluna_eventos_vazia:
             total_af += parse_min(af)
 
-        # Débitos negativos (atrasos/saídas antecipadas explícitos)
-        if debito_col and re.match(r"-\d{1,2}:\d{2}", debito_col):
-            total_debito += parse_min(debito_col[1:])
+        # Debitos negativos: descontar sempre
+        if deb and re.match(r"-\d{1,2}:\d{2}", deb):
+            total_debito += parse_min(deb[1:])
 
     result["he_uteis"]       = round(he_uteis / 60, 4)
     result["he_sabado"]      = round(he_sabado / 60, 4)
@@ -159,7 +126,7 @@ def extract_all(pdf_bytes: bytes) -> dict:
     if not result["nome"]:
         text = extract_text(io.BytesIO(pdf_bytes))
         nm = re.search(
-            r"Nome:\s+([A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ][A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ\s]+?)(?:\n|Matrícula|PIS|CPF)",
+            r"Nome:\s+([A-Z][A-Z\s]+?)(?:\n|Matricula|PIS|CPF)",
             text, re.IGNORECASE
         )
         if nm:
@@ -193,12 +160,10 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/health")
 def health():
-    import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "3.2", "pdfminer": pdfminer.__version__},
+        content={"status": "ok", "api_key_configured": True, "version": "4.0"},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
-
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
