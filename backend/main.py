@@ -109,9 +109,9 @@ def extract_all(pdf_bytes: bytes) -> dict:
                     return i["text"]
             return ""
 
-        hp         = val_at(440, 490)  # Horas Positivas (HE)
-        af         = val_at(495, 535)  # Atrasos e Faltas
-        debito_col = val_at(570, 635)  # Débito (negativo)
+        hp         = val_at(435, 492)  # Horas Positivas (HE): x~439-477
+        af         = val_at(493, 535)  # Atrasos e Faltas: x~496-509
+        debito_col = val_at(570, 640)  # Débito (negativo): x~601
 
         # HE por tipo de dia
         if hp and re.match(r"\d{1,2}:\d{2}", hp):
@@ -124,7 +124,9 @@ def extract_all(pdf_bytes: bytes) -> dict:
                 he_feriado += mins
 
         # Atrasos e Faltas (positivos — faltas não justificadas)
-        if af and re.match(r"\d{1,2}:\d{2}", af):
+        # Ignorar se houver Atestado Médico na coluna Eventos da mesma linha
+        eventos = val_at(640, 850)
+        if af and re.match(r"\d{1,2}:\d{2}", af) and not re.search(r"[Aa]testado", eventos or ""):
             total_af += parse_min(af)
 
         # Débitos negativos (atrasos/saídas antecipadas explícitos)
