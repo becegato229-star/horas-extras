@@ -164,6 +164,17 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
+    # DEBUG: incluir itens relevantes para diagnóstico
+    debug_items = []
+    for page_layout in extract_pages(io.BytesIO(contents)):
+        for element in page_layout:
+            if isinstance(element, LTTextBox):
+                for line in element:
+                    if isinstance(line, LTTextLine):
+                        txt = line.get_text().strip()
+                        if txt and (430 <= round(line.x0) <= 870) and re.match(r"\d|Atestado|-", txt):
+                            debug_items.append({"t": txt, "x": round(line.x0), "y": round(line.y0, 1)})
+
     return {
         "nome":           data["nome"],
         "he_uteis":       data["he_uteis"],
@@ -171,6 +182,7 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_feriado":     data["he_feriado"],
         "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
+        "_debug":         debug_items[:40],
     }
 
 
