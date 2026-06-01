@@ -1,8 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pdfminer.high_level import extract_text
-from collections import Counter
+from fastapi.responses import JSONResponse
+from pdfminer.high_level import extract_text, extract_pages
+from pdfminer.layout import LTTextBox, LTTextLine
+from collections import defaultdict
 import re
 import io
 import os
@@ -20,7 +22,6 @@ app.add_middleware(
 )
 
 from fastapi import Request
-from fastapi.responses import Response
 
 @app.middleware("http")
 async def no_cache_middleware(request: Request, call_next):
@@ -38,11 +39,24 @@ def parse_min(s: str) -> int:
 
 
 def parse_hhmm(s: str) -> float:
-    mins = parse_min(s)
-    return round(mins / 60, 4)
+    return round(parse_min(s) / 60, 4)
 
 
-def extract_data(text: str) -> dict:
+def extract_all(pdf_bytes: bytes) -> dict:
+    """
+    Extrai HE e descontos usando coordenadas posicionais do PDF.
+    Mapeamento de colunas (x):
+      ~32  → Data (pode incluir tipo embutido ex: '16 mai., sáb. DUNT')
+      ~82  → Tipo Dia (TRAB/DUNT/FERIADO/FOLG quando separado)
+      ~123 → Jornada Esperada
+      ~208 → Marcações Originais
+      ~398 → Horas Realizadas
+      ~455 → Horas Positivas (HE)
+      ~509 → Atrasos e Faltas
+      ~601 → Débito (valores negativos)
+      ~638 → Crédito
+      ~650+→ Eventos (Atestado Médico, Feriado, etc.)
+    """
     result = {
         "nome": "",
         "he_uteis": 0.0,
@@ -52,56 +66,103 @@ def extract_data(text: str) -> dict:
         "horas_desconto": 0.0,
     }
 
-    # ── Nome ──────────────────────────────────────────────────────
-    nome_match = re.search(
-        r"Nome:\s+([A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ][A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ\s]+?)(?:\n|Matrícula|PIS|CPF)",
-        text, re.IGNORECASE
-    )
-    if nome_match:
-        result["nome"] = nome_match.group(1).strip()
+    items = []
+    for page_layout in extract_pages(io.BytesIO(pdf_bytes)):
+        for element in page_layout:
+            if isinstance(element, LTTextBox):
+                for line in element:
+                    if isinstance(line, LTTextLine):
+                        txt = line.get_text().strip()
+                        if txt:
+                            items.append({
+                                "text": txt,
+                                "x": round(line.x0),
+                                "y": round(line.y0, 1),
+                            })
 
-    # ── HE Sábado: campo "H.E. Dia Útil" do resumo Flash ─────────
-    # No sistema Flash/MUBEC, sábados DUNT são classificados como "Dia Útil"
-    he_util_flash = re.search(
-        r"H\.E\.?\s*Dia\s*[ÚU]til[^\n]{0,80}?(\d{1,3}:\d{2})",
-        text, re.IGNORECASE
-    )
-    if he_util_flash:
-        result["he_sabado"] = parse_hhmm(he_util_flash.group(1))
+    linhas = defaultdict(list)
+    for item in items:
+        linhas[item["y"]].append(item)
 
-    # ── HE Feriado: campo "H.E. Feriado" do resumo ───────────────
-    he_feriado_match = re.search(
-        r"H\.E\.?\s*Feriado[^\n]{0,60}?(\d{1,3}:\d{2})",
-        text, re.IGNORECASE
-    )
-    feriado_str = None
-    if he_feriado_match:
-        feriado_str = he_feriado_match.group(1)
-        result["he_feriado"] = parse_hhmm(feriado_str)
+    he_uteis = he_sabado = he_feriado = total_debito = total_falta = 0
 
-    # ── HE Dias Úteis: horas positivas de TRAB que aparecem 2x ───
-    # O pdfminer extrai a coluna "Horas Positivas" e "Crédito" separadamente,
-    # fazendo com que cada valor de HE de dia útil apareça exatamente 2x no texto.
-    # Filtramos valores <= 3h59 (máximo realista de HE diária) excluindo feriado.
-    corpo = text[:text.find("Totais Gerais")] if "Totais Gerais" in text else text
-    todos = re.findall(r'\b(\d{1,2}:\d{2})\b', corpo)
-    pequenos = [v for v in todos if 0 < parse_min(v) <= 239]
-    contagem = Counter(pequenos)
-    he_uteis_vals = [v for v, cnt in contagem.items() if cnt == 2 and v != feriado_str]
-    result["he_uteis"] = round(sum(parse_min(v) for v in he_uteis_vals) / 60, 4)
+    for y in sorted(linhas.keys(), reverse=True):
+        linha = sorted(linhas[y], key=lambda i: i["x"])
+        textos = [i["text"] for i in linha]
 
-    # ── Horas descontadas: soma coluna Débito (atrasos e faltas) ──
-    # Os débitos aparecem como "-HH:MM" em linhas isoladas
-    # entre o cabeçalho "Débito" e "Totais Gerais"
-    debito_match = re.search(
-        r"D[eé]bito\n(.*?)Totais Gerais",
-        text, re.DOTALL | re.IGNORECASE
-    )
-    if debito_match:
-        bloco_debito = debito_match.group(1)
-        debitos = re.findall(r"(?:^|\n)-(\d{1,2}:\d{2})(?:\n|$)", bloco_debito)
-        total_debito = sum(parse_min(v) for v in debitos)
-        result["horas_desconto"] = round(total_debito / 60, 4)
+        # Extrair nome do funcionário
+        if not result["nome"]:
+            for t in textos:
+                nm = re.match(r"Nome:\s+(.+)", t)
+                if nm:
+                    result["nome"] = nm.group(1).strip()
+                    break
+
+        # Detectar data e tipo (separados ou embutidos no mesmo campo)
+        data_match = next((t for t in textos if re.match(r"\d{2} \w+\.,", t)), None)
+        if not data_match:
+            continue
+
+        tipo_sep = next((t for t in textos if t in ("TRAB", "DUNT", "FERIADO", "FOLG")), None)
+        tipo_emb = None
+        if not tipo_sep:
+            for kw in ("TRAB", "DUNT", "FERIADO", "FOLG"):
+                if kw in data_match:
+                    tipo_emb = kw
+                    break
+        tipo = tipo_sep or tipo_emb
+
+        if not tipo or tipo == "FOLG":
+            continue
+
+        def val_at(x_min, x_max):
+            for i in sorted(linha, key=lambda i: i["x"]):
+                if x_min <= i["x"] <= x_max:
+                    return i["text"]
+            return ""
+
+        marcacao    = val_at(180, 270)   # Marcações Originais
+        jornada_esp = val_at(100, 175)   # Jornada Esperada
+        hp          = val_at(440, 490)   # Horas Positivas (HE)
+        debito_col  = val_at(570, 635)   # Débito (negativo)
+        eventos     = val_at(650, 850)   # Eventos (Atestado, etc.)
+
+        # Acumular HE por tipo de dia
+        if hp and re.match(r"\d{1,2}:\d{2}", hp):
+            mins = parse_min(hp)
+            if tipo == "TRAB":
+                he_uteis += mins
+            elif tipo == "DUNT":
+                he_sabado += mins
+            elif tipo == "FERIADO":
+                he_feriado += mins
+
+        # Débitos negativos (atrasos / saídas antecipadas)
+        if debito_col and re.match(r"-\d{1,2}:\d{2}", debito_col):
+            total_debito += parse_min(debito_col[1:])
+
+        # Faltas: TRAB sem marcação e sem Atestado Médico
+        if tipo == "TRAB" and not marcacao and not re.search(r"[Aa]testado", eventos or ""):
+            if jornada_esp:
+                turnos = re.findall(r"(\d{2}:\d{2})-(\d{2}:\d{2})", jornada_esp)
+                mins_j = sum(parse_min(f) - parse_min(i) for i, f in turnos)
+                if mins_j > 0:
+                    total_falta += mins_j
+
+    result["he_uteis"]        = round(he_uteis / 60, 4)
+    result["he_sabado"]       = round(he_sabado / 60, 4)
+    result["he_feriado"]      = round(he_feriado / 60, 4)
+    result["horas_desconto"]  = round((total_debito + total_falta) / 60, 4)
+
+    # Fallback para nome via texto simples se coordenadas não encontraram
+    if not result["nome"]:
+        text = extract_text(io.BytesIO(pdf_bytes))
+        nm = re.search(
+            r"Nome:\s+([A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ][A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕÇ\s]+?)(?:\n|Matrícula|PIS|CPF)",
+            text, re.IGNORECASE
+        )
+        if nm:
+            result["nome"] = nm.group(1).strip()
 
     return result
 
@@ -113,31 +174,25 @@ async def parse_pdf(file: UploadFile = File(...)):
 
     try:
         contents = await file.read()
-        texto = extract_text(io.BytesIO(contents))
+        data = extract_all(contents)
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Erro ao extrair texto do PDF: {str(e)}")
-
-    try:
-        data = extract_data(texto)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao interpretar espelho: {str(e)}")
+        raise HTTPException(status_code=422, detail=f"Erro ao processar PDF: {str(e)}")
 
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
     return {
-        "nome": data["nome"],
-        "he_uteis": data["he_uteis"],
-        "he_sabado": data["he_sabado"],
-        "he_feriado": data["he_feriado"],
-        "he_acima8h": data["he_acima8h"],
+        "nome":           data["nome"],
+        "he_uteis":       data["he_uteis"],
+        "he_sabado":      data["he_sabado"],
+        "he_feriado":     data["he_feriado"],
+        "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
     }
 
 
 @app.get("/api/health")
 def health():
-    from fastapi.responses import JSONResponse
     return JSONResponse(
         content={"status": "ok", "api_key_configured": True},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
