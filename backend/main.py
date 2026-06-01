@@ -39,8 +39,10 @@ def extract_all(pdf_bytes: bytes) -> dict:
         "horas_desconto": 0.0,
     }
 
+    import gc
     items = []
-    for page_layout in extract_pages(io.BytesIO(pdf_bytes)):
+    pdf_stream = io.BytesIO(bytes(pdf_bytes))  # cópia fresca dos bytes
+    for page_layout in extract_pages(pdf_stream):
         for element in page_layout:
             if isinstance(element, LTTextBox):
                 for line in element:
@@ -52,6 +54,8 @@ def extract_all(pdf_bytes: bytes) -> dict:
                                 "x": round(line.x0),
                                 "y": round(line.y0, 1),
                             })
+    pdf_stream.close()
+    gc.collect()
 
     linhas = defaultdict(list)
     for item in items:
@@ -162,7 +166,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 @app.get("/api/health")
 def health():
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "4.1"},
+        content={"status": "ok", "api_key_configured": True, "version": "4.2"},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
