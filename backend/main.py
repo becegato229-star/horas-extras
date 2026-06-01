@@ -195,7 +195,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 def health():
     import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "3.0-final", "pdfminer": pdfminer.__version__},
+        content={"status": "ok", "api_key_configured": True, "version": "3.1", "pdfminer": pdfminer.__version__},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
