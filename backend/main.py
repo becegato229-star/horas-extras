@@ -168,16 +168,16 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
-    # Debug: encontrar onde está "Atestado Médico" no PDF
-    atestado_items = []
+    # Debug: todos os textos com x > 550 (coluna eventos)
+    eventos_items = []
     for page_layout in extract_pages(io.BytesIO(contents)):
         for element in page_layout:
             if isinstance(element, LTTextBox):
                 for line in element:
                     if isinstance(line, LTTextLine):
                         txt = line.get_text().strip()
-                        if "testado" in txt or "testado" in txt.lower():
-                            atestado_items.append({"x": round(line.x0), "y": round(line.y0,1), "t": txt})
+                        if txt and round(line.x0) > 550:
+                            eventos_items.append({"x": round(line.x0), "y": round(line.y0,1), "t": txt})
 
     return {
         "nome":           data["nome"],
@@ -186,7 +186,7 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_feriado":     data["he_feriado"],
         "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
-        "_atestados": atestado_items,
+        "_eventos": sorted(eventos_items, key=lambda i: -i["y"])[:30],
     }
 
 
@@ -194,7 +194,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 def health():
     import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "2.6", "pdfminer": pdfminer.__version__},
+        content={"status": "ok", "api_key_configured": True, "version": "2.7", "pdfminer": pdfminer.__version__},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
