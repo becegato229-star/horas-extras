@@ -90,13 +90,18 @@ def extract_data(text: str) -> dict:
     he_uteis_vals = [v for v, cnt in contagem.items() if cnt == 2 and v != feriado_str]
     result["he_uteis"] = round(sum(parse_min(v) for v in he_uteis_vals) / 60, 4)
 
-    # ── Total Horas a Descontar ─────────────────────────────────
-    desconto_match = re.search(
-        r"Total\s+Horas?\s+a\s+Descontar[^\d]*(\d{1,3}:\d{2})",
-        text, re.IGNORECASE
+    # ── Horas descontadas: soma coluna Débito (atrasos e faltas) ──
+    # Os débitos aparecem como "-HH:MM" em linhas isoladas
+    # entre o cabeçalho "Débito" e "Totais Gerais"
+    debito_match = re.search(
+        r"D[eé]bito\n(.*?)Totais Gerais",
+        text, re.DOTALL | re.IGNORECASE
     )
-    if desconto_match:
-        result["horas_desconto"] = parse_hhmm(desconto_match.group(1))
+    if debito_match:
+        bloco_debito = debito_match.group(1)
+        debitos = re.findall(r"(?:^|\n)-(\d{1,2}:\d{2})(?:\n|$)", bloco_debito)
+        total_debito = sum(parse_min(v) for v in debitos)
+        result["horas_desconto"] = round(total_debito / 60, 4)
 
     return result
 
