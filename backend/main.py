@@ -2,8 +2,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from pdfminer.high_level import extract_text, extract_pages
-from pdfminer.layout import LTTextBox, LTTextLine
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LAParams, LTTextBox, LTTextLine
+from pdfminer.high_level import extract_text
 from collections import defaultdict
 import re, io, os
 from dotenv import load_dotenv
@@ -11,7 +14,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(title="MUBEC — Calculadora de Horas Extras")
-
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.middleware("http")
@@ -29,21 +31,17 @@ def parse_min(s: str) -> int:
     return int(m.group(1)) * 60 + int(m.group(2)) if m else 0
 
 
-def extract_all(pdf_bytes: bytes) -> dict:
-    result = {
-        "nome": "",
-        "he_uteis": 0.0,
-        "he_sabado": 0.0,
-        "he_feriado": 0.0,
-        "he_acima8h": 0.0,
-        "horas_desconto": 0.0,
-    }
-
-    import gc
+def get_items(pdf_bytes: bytes) -> list:
+    """Extrai itens do PDF sem cache, garantindo isolamento entre requisições."""
+    rsrcmgr = PDFResourceManager(caching=False)
+    device = PDFPageAggregator(rsrcmgr, laparams=LAParams())
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
     items = []
-    pdf_stream = io.BytesIO(bytes(pdf_bytes))  # cópia fresca dos bytes
-    for page_layout in extract_pages(pdf_stream):
-        for element in page_layout:
+    fp = io.BytesIO(bytes(pdf_bytes))
+    for page in PDFPage.get_pages(fp, caching=False):
+        interpreter.process_page(page)
+        layout = device.get_result()
+        for element in layout:
             if isinstance(element, LTTextBox):
                 for line in element:
                     if isinstance(line, LTTextLine):
@@ -54,8 +52,22 @@ def extract_all(pdf_bytes: bytes) -> dict:
                                 "x": round(line.x0),
                                 "y": round(line.y0, 1),
                             })
-    pdf_stream.close()
-    gc.collect()
+    device.close()
+    fp.close()
+    return items
+
+
+def extract_all(pdf_bytes: bytes) -> dict:
+    result = {
+        "nome": "",
+        "he_uteis": 0.0,
+        "he_sabado": 0.0,
+        "he_feriado": 0.0,
+        "he_acima8h": 0.0,
+        "horas_desconto": 0.0,
+    }
+
+    items = get_items(pdf_bytes)
 
     linhas = defaultdict(list)
     for item in items:
@@ -91,34 +103,29 @@ def extract_all(pdf_bytes: bytes) -> dict:
         if not tipo or tipo == "FOLG":
             continue
 
-        def val_at(x_min, x_max, _linha=linha):
-            for i in sorted(_linha, key=lambda i: i["x"]):
+        def val_at(x_min, x_max, _l=linha):
+            for i in sorted(_l, key=lambda i: i["x"]):
                 if x_min <= i["x"] <= x_max:
                     return i["text"]
             return ""
 
-        hp  = val_at(435, 492)   # Horas Positivas
-        af  = val_at(493, 535)   # Atrasos e Faltas
-        deb = val_at(570, 640)   # Debito (negativo)
+        hp  = val_at(435, 492)
+        af  = val_at(493, 535)
+        deb = val_at(570, 640)
 
-        # HE por tipo de dia
+        # HE por tipo
         if hp and re.match(r"\d{1,2}:\d{2}", hp):
             mins = parse_min(hp)
-            if tipo == "TRAB":
-                he_uteis += mins
-            elif tipo == "DUNT":
-                he_sabado += mins
-            elif tipo == "FERIADO":
-                he_feriado += mins
+            if tipo == "TRAB":      he_uteis  += mins
+            elif tipo == "DUNT":    he_sabado += mins
+            elif tipo == "FERIADO": he_feriado += mins
 
-        # Descontar AF apenas se coluna Eventos (x > 600) estiver VAZIA
-        # Se houver qualquer texto em Eventos (Atestado, Feriado, etc.) nao descontar
-        _linha_local = linha[:]
-        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in _linha_local)
+        # Descontar AF apenas se coluna Eventos (x > 600) estiver vazia
+        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in linha)
         if af and re.match(r"\d{1,2}:\d{2}", af) and coluna_eventos_vazia:
             total_af += parse_min(af)
 
-        # Debitos negativos: descontar sempre
+        # Debitos negativos
         if deb and re.match(r"-\d{1,2}:\d{2}", deb):
             total_debito += parse_min(deb[1:])
 
@@ -127,15 +134,15 @@ def extract_all(pdf_bytes: bytes) -> dict:
     result["he_feriado"]     = round(he_feriado / 60, 4)
     result["horas_desconto"] = round((total_af + total_debito) / 60, 4)
 
-    # Fallback para nome
+    # Fallback nome
     if not result["nome"]:
-        text = extract_text(io.BytesIO(pdf_bytes))
-        nm = re.search(
-            r"Nome:\s+([A-Z][A-Z\s]+?)(?:\n|Matricula|PIS|CPF)",
-            text, re.IGNORECASE
-        )
-        if nm:
-            result["nome"] = nm.group(1).strip()
+        try:
+            text = extract_text(io.BytesIO(bytes(pdf_bytes)))
+            nm = re.search(r"Nome:\s+([A-Z][A-Z\s]+?)(?:\n|Matricula|PIS|CPF)", text, re.IGNORECASE)
+            if nm:
+                result["nome"] = nm.group(1).strip()
+        except Exception:
+            pass
 
     return result
 
@@ -166,7 +173,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 @app.get("/api/health")
 def health():
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "4.2"},
+        content={"status": "ok", "api_key_configured": True, "version": "5.0"},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
