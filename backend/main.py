@@ -168,16 +168,19 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
-    # Recalcular manualmente para diagnóstico
-    items2 = []
+    # Debug: mostrar todos os itens com y próximo de 404.3 (dia do atestado)
+    all_items = []
     for page_layout in extract_pages(io.BytesIO(contents)):
         for element in page_layout:
             if isinstance(element, LTTextBox):
                 for line in element:
                     if isinstance(line, LTTextLine):
                         txt = line.get_text().strip()
-                        if txt and 490 <= round(line.x0) <= 540:
-                            items2.append({"x": round(line.x0), "y": round(line.y0,1), "t": txt})
+                        if txt:
+                            y = round(line.y0, 1)
+                            x = round(line.x0)
+                            if abs(y - 404.3) < 2:
+                                all_items.append({"x": x, "y": y, "t": txt})
 
     return {
         "nome":           data["nome"],
@@ -186,7 +189,7 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_feriado":     data["he_feriado"],
         "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
-        "_af_items":      items2,
+        "_linha_atestado": sorted(all_items, key=lambda i: i["x"]),
     }
 
 
@@ -194,7 +197,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 def health():
     import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "2.4", "pdfminer": pdfminer.__version__},
+        content={"status": "ok", "api_key_configured": True, "version": "2.5", "pdfminer": pdfminer.__version__},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
