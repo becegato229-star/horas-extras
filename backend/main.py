@@ -125,9 +125,13 @@ def extract_all(pdf_bytes: bytes) -> dict:
 
         # Atrasos e Faltas (positivos — faltas não justificadas)
         # Ignorar se houver Atestado Médico na coluna Eventos da mesma linha
-        eventos = val_at(641, 850)  # v2.1: range ajustado para evitar sobreposição com debito_col
-        if af and re.match(r"\d{1,2}:\d{2}", af) and not re.search(r"[Aa]testado", eventos or ""):
-            total_af += parse_min(af)
+        eventos = val_at(641, 850)
+        if af and re.match(r"\d{1,2}:\d{2}", af):
+            tem_atestado = bool(re.search(r"[Aa]testado", eventos or ""))
+            if not tem_atestado:
+                total_af += parse_min(af)
+            else:
+                pass  # ignorado: atestado médico
 
         # Débitos negativos (atrasos/saídas antecipadas explícitos)
         if debito_col and re.match(r"-\d{1,2}:\d{2}", debito_col):
@@ -164,6 +168,17 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not data["nome"]:
         data["nome"] = file.filename.replace(".pdf", "").replace("_", " ")
 
+    # Recalcular manualmente para diagnóstico
+    items2 = []
+    for page_layout in extract_pages(io.BytesIO(contents)):
+        for element in page_layout:
+            if isinstance(element, LTTextBox):
+                for line in element:
+                    if isinstance(line, LTTextLine):
+                        txt = line.get_text().strip()
+                        if txt and 490 <= round(line.x0) <= 540:
+                            items2.append({"x": round(line.x0), "y": round(line.y0,1), "t": txt})
+
     return {
         "nome":           data["nome"],
         "he_uteis":       data["he_uteis"],
@@ -171,13 +186,15 @@ async def parse_pdf(file: UploadFile = File(...)):
         "he_feriado":     data["he_feriado"],
         "he_acima8h":     data["he_acima8h"],
         "horas_desconto": data["horas_desconto"],
+        "_af_items":      items2,
     }
 
 
 @app.get("/api/health")
 def health():
+    import pdfminer
     return JSONResponse(
-        content={"status": "ok", "api_key_configured": True, "version": "2.3-clean"},
+        content={"status": "ok", "api_key_configured": True, "version": "2.4", "pdfminer": pdfminer.__version__},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
