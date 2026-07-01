@@ -28,6 +28,7 @@ def parse_min(s):
     return int(m.group(1))*60+int(m.group(2)) if m else 0
 
 def tem_marcacao(linha):
+    """Verifica se a linha tem marcação de ponto real."""
     for i in linha:
         if re.search(r"\d{2}:\d{2}-\d{2}:\d{2}", i["text"]):
             if len(re.findall(r"\d{2}:\d{2}-\d{2}:\d{2}", i["text"])) > 2:
@@ -35,6 +36,29 @@ def tem_marcacao(linha):
         if 180 <= i["x"] <= 360 and re.search(r"\d{2}:\d{2}-\d{2}:\d{2}", i["text"]):
             return True
     return False
+
+def get_hp_af(linha):
+    """
+    Retorna (hp, af) da linha.
+    HP = existe apenas quando há 2+ valores HH:MM no range 370-492
+         (o primeiro é HR, o segundo é HP) ou 1 valor em x>=435
+    AF = valor HH:MM no range 493-540
+    """
+    candidatos = sorted(
+        [i for i in linha if 370 <= i["x"] <= 540 and re.match(r"^\d{1,2}:\d{2}$", i["text"])],
+        key=lambda i: i["x"]
+    )
+    af_items = [i for i in candidatos if i["x"] >= 493]
+    hp_items = [i for i in candidatos if i["x"] < 493]
+
+    hp = ""
+    if len(candidatos) >= 2 and hp_items:
+        hp = hp_items[-1]["text"]
+    elif len(candidatos) == 1 and candidatos[0]["x"] >= 435:
+        hp = candidatos[0]["text"]
+
+    af = af_items[0]["text"] if af_items else ""
+    return hp, af
 
 def get_items(pdf_bytes):
     rsrcmgr = PDFResourceManager(caching=False)
@@ -77,29 +101,33 @@ def extract_all(pdf_bytes):
                 if kw in data_match: tipo_emb = kw; break
         tipo = tipo_sep or tipo_emb
         if not tipo or tipo == "FOLG": continue
-        def val_at(x_min, x_max, _l=linha):
-            for i in sorted(_l, key=lambda i: i["x"]):
-                if x_min <= i["x"] <= x_max: return i["text"]
-            return ""
-        hp  = val_at(435, 492)
-        af  = val_at(493, 535)
-        deb = val_at(570, 640)
+
+        hp, af = get_hp_af(linha)
+        deb = next((i["text"] for i in linha if 570 <= i["x"] <= 640 and re.match(r"^-\d{1,2}:\d{2}$", i["text"])), "")
         linha_tem_marcacao = tem_marcacao(linha)
-        coluna_eventos_vazia = not any(i["x"] > 600 and i["text"] for i in linha)
+        coluna_eventos_vazia = not any(
+            i["x"] > 580 and i["text"] and not re.match(r"^\d", i["text"])
+            for i in linha
+        )
+
         if hp and re.match(r"\d{1,2}:\d{2}", hp) and linha_tem_marcacao:
             mins = parse_min(hp)
-            if tipo == "TRAB": he_uteis += mins
-            elif tipo == "DUNT": he_sabado += mins
+            if tipo == "TRAB":      he_uteis  += mins
+            elif tipo == "DUNT":    he_sabado += mins
             elif tipo == "FERIADO": he_feriado += mins
+
         af_val = hp if (hp and not linha_tem_marcacao) else af
         if af_val and re.match(r"\d{1,2}:\d{2}", af_val) and coluna_eventos_vazia:
             total_af += parse_min(af_val)
-        if deb and re.match(r"-\d{1,2}:\d{2}", deb):
+
+        if deb:
             total_debito += parse_min(deb[1:])
+
     result["he_uteis"]       = round(he_uteis/60, 4)
     result["he_sabado"]      = round(he_sabado/60, 4)
     result["he_feriado"]     = round(he_feriado/60, 4)
     result["horas_desconto"] = round((total_af+total_debito)/60, 4)
+
     if not result["nome"]:
         try:
             text = extract_text(io.BytesIO(bytes(pdf_bytes)))
@@ -124,7 +152,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/health")
 def health():
-    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"6.0"},
+    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"7.0"},
                         headers={"Cache-Control":"no-cache, no-store, must-revalidate"})
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
