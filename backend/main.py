@@ -32,6 +32,23 @@ EVENTO_JUSTIFICATIVA = re.compile(
     re.IGNORECASE
 )
 
+def calibrar_colunas(items):
+    """Encontra X real das colunas HP e AF pelo cabeçalho da tabela."""
+    linhas = defaultdict(list)
+    for item in items: linhas[item["y"]].append(item)
+    x_hp = x_af = None
+    for y in sorted(linhas.keys(), reverse=True):
+        linha = sorted(linhas[y], key=lambda i: i["x"])
+        for i in linha:
+            t = i["text"]
+            if 'Positivas' in t and not re.match(r'\d', t) and x_hp is None:
+                x_hp = i["x"]
+            if 'Faltas' in t and not re.match(r'\d', t) and x_af is None:
+                x_af = i["x"]
+        if x_hp and x_af and x_hp != x_af:
+            return x_hp, x_af
+    return None, None
+
 def tem_marcacao(linha):
     for i in linha:
         if re.search(r"\d{2}:\d{2}-\d{2}:\d{2}", i["text"]):
@@ -41,34 +58,36 @@ def tem_marcacao(linha):
             return True
     return False
 
-def get_hp_af(linha, tipo):
+def get_hp_af(linha, x_hp_col, x_af_col):
     """
-    HP = Horas Positivas (HE a pagar): x=431-490, < 4h para TRAB
-    AF = Atrasos e Faltas (desconto):  x=491-599, ou HP >= 4h reclassificado
-    Fallback: HP em x=426-430 quando HR fica em x<426 (layout Romildo)
+    Identifica HP (HE a pagar) e AF (desconto) usando calibracao pelo cabecalho.
+    Quando cabecalho nao disponivel usa ranges empiricos (x=431-490 HP, x=491-599 AF).
     """
     def is_hhmm(t): return bool(re.match(r"^\d{1,2}:\d{2}$", t)) and parse_min(t) > 0
+    MARGEM = 25
 
-    hp_cands = [i for i in linha if 431 <= i["x"] <= 490 and is_hhmm(i["text"])]
-    af_cands = [i for i in linha if 491 <= i["x"] <= 599 and is_hhmm(i["text"])]
+    if x_hp_col and x_af_col:
+        hp_cands = [i for i in linha
+                    if abs(i["x"]-x_hp_col) <= MARGEM
+                    and abs(i["x"]-x_hp_col) < abs(i["x"]-x_af_col)
+                    and is_hhmm(i["text"])]
+        af_cands = [i for i in linha
+                    if abs(i["x"]-x_af_col) <= MARGEM
+                    and abs(i["x"]-x_af_col) <= abs(i["x"]-x_hp_col)
+                    and is_hhmm(i["text"])]
+    else:
+        hp_cands = [i for i in linha if 431 <= i["x"] <= 490 and is_hhmm(i["text"])]
+        af_cands = [i for i in linha if 491 <= i["x"] <= 599 and is_hhmm(i["text"])]
+
     hp = hp_cands[0]["text"] if hp_cands else ""
     af = af_cands[0]["text"] if af_cands else ""
 
-    # Para dias TRAB: HP >= 4h indica AF (desconto), não HE
-    if hp and tipo == "TRAB" and parse_min(hp) >= 240:
-        if not af: af = hp
-        hp = ""
-
-    # Fallback x=426-430 (layout com HR em x~382)
-    if not hp:
-        hp_ext = [i for i in linha if 426 <= i["x"] <= 430 and is_hhmm(i["text"])]
-        hr_antes = [i for i in linha if 370 <= i["x"] <= 425 and is_hhmm(i["text"])]
+    # Fallback: HP em x=426-430 quando HR fica em x<426
+    if not hp and x_hp_col and abs(x_hp_col - 420) < 10:
+        hp_ext = [i for i in linha if 420 <= i["x"] <= 432 and is_hhmm(i["text"])]
+        hr_antes = [i for i in linha if 360 <= i["x"] <= 419 and is_hhmm(i["text"])]
         if hp_ext and hr_antes:
-            hp_val = hp_ext[0]["text"]
-            if tipo == "TRAB" and parse_min(hp_val) >= 240:
-                if not af: af = hp_val
-            else:
-                hp = hp_val
+            hp = hp_ext[0]["text"]
 
     return hp, af
 
@@ -94,6 +113,7 @@ def get_items(pdf_bytes):
 def extract_all(pdf_bytes):
     result = {"nome":"","he_uteis":0.0,"he_sabado":0.0,"he_feriado":0.0,"he_acima8h":0.0,"horas_desconto":0.0}
     items = get_items(pdf_bytes)
+    x_hp_col, x_af_col = calibrar_colunas(items)
     linhas = defaultdict(list)
     for item in items: linhas[item["y"]].append(item)
     he_uteis = he_sabado = he_feriado = total_af = total_debito = 0
@@ -114,14 +134,10 @@ def extract_all(pdf_bytes):
         tipo = tipo_sep or tipo_emb
         if not tipo or tipo == "FOLG": continue
 
-        hp, af = get_hp_af(linha, tipo)
+        hp, af = get_hp_af(linha, x_hp_col, x_af_col)
         deb = next((i["text"] for i in linha if 570 <= i["x"] <= 640 and re.match(r"^-\d{1,2}:\d{2}$", i["text"])), "")
         linha_tem_marcacao = tem_marcacao(linha)
-        # Bloquear AF apenas quando há evento que justifica ausência
-        justificado = any(
-            i["x"] > 580 and i["text"] and EVENTO_JUSTIFICATIVA.search(i["text"])
-            for i in linha
-        )
+        justificado = any(i["x"] > 580 and i["text"] and EVENTO_JUSTIFICATIVA.search(i["text"]) for i in linha)
 
         if hp and linha_tem_marcacao:
             mins = parse_min(hp)
@@ -165,7 +181,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/health")
 def health():
-    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"9.0"},
+    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"10.0"},
                         headers={"Cache-Control":"no-cache, no-store, must-revalidate"})
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
