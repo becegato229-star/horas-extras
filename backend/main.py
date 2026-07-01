@@ -39,25 +39,30 @@ def tem_marcacao(linha):
 
 def get_hp_af(linha):
     """
-    Retorna (hp, af) da linha.
-    HP = existe apenas quando há 2+ valores HH:MM no range 370-492
-         (o primeiro é HR, o segundo é HP) ou 1 valor em x>=435
-    AF = valor HH:MM no range 493-540
+    Identifica Horas Positivas (HP/HE) e Atrasos e Faltas (AF).
+
+    Layout do espelho Flash por coordenada X:
+      x ~370-430 = Horas Realizadas (HR) — ignorado para HE
+      x ~431-490 = Horas Positivas (HP) — HE a pagar
+      x ~491-599 = Atrasos e Faltas (AF) — desconto
+      Exceção: alguns PDFs têm HP em x=426-430 quando HR fica em x~382-383
     """
-    candidatos = sorted(
-        [i for i in linha if 370 <= i["x"] <= 540 and re.match(r"^\d{1,2}:\d{2}$", i["text"])],
-        key=lambda i: i["x"]
-    )
-    af_items = [i for i in candidatos if i["x"] >= 493]
-    hp_items = [i for i in candidatos if i["x"] < 493]
+    def is_hhmm(t): return bool(re.match(r"^\d{1,2}:\d{2}$", t)) and parse_min(t) > 0
 
-    hp = ""
-    if len(candidatos) >= 2 and hp_items:
-        hp = hp_items[-1]["text"]
-    elif len(candidatos) == 1 and candidatos[0]["x"] >= 435:
-        hp = candidatos[0]["text"]
+    hp_cands = [i for i in linha if 431 <= i["x"] <= 490 and is_hhmm(i["text"])]
+    af_cands = [i for i in linha if 491 <= i["x"] <= 599 and is_hhmm(i["text"])]
 
-    af = af_items[0]["text"] if af_items else ""
+    hp = hp_cands[0]["text"] if hp_cands else ""
+    af = af_cands[0]["text"] if af_cands else ""
+
+    # Fallback: HP em x=426-430 ocorre quando HR fica em x~382-383
+    # Nesse caso há valor em x<426 (HR) E valor em x=426-430 (HP)
+    if not hp:
+        hp_ext = [i for i in linha if 426 <= i["x"] <= 430 and is_hhmm(i["text"])]
+        hr_antes = [i for i in linha if 370 <= i["x"] <= 425 and is_hhmm(i["text"])]
+        if hp_ext and hr_antes:
+            hp = hp_ext[0]["text"]
+
     return hp, af
 
 def get_items(pdf_bytes):
@@ -110,14 +115,16 @@ def extract_all(pdf_bytes):
             for i in linha
         )
 
-        if hp and re.match(r"\d{1,2}:\d{2}", hp) and linha_tem_marcacao:
+        # HP conta como HE apenas se tem marcação de ponto
+        if hp and linha_tem_marcacao:
             mins = parse_min(hp)
             if tipo == "TRAB":      he_uteis  += mins
             elif tipo == "DUNT":    he_sabado += mins
             elif tipo == "FERIADO": he_feriado += mins
 
+        # AF: valor em af_cands OU hp quando sem marcação (layout comprimido)
         af_val = hp if (hp and not linha_tem_marcacao) else af
-        if af_val and re.match(r"\d{1,2}:\d{2}", af_val) and coluna_eventos_vazia:
+        if af_val and coluna_eventos_vazia:
             total_af += parse_min(af_val)
 
         if deb:
@@ -152,7 +159,7 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/health")
 def health():
-    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"7.0"},
+    return JSONResponse(content={"status":"ok","api_key_configured":True,"version":"8.0"},
                         headers={"Cache-Control":"no-cache, no-store, must-revalidate"})
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
